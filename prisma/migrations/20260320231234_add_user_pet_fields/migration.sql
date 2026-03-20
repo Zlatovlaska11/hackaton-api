@@ -1,0 +1,3 @@
+ALTER TABLE "Users"
+ADD COLUMN "petType" TEXT,
+ADD COLUMN "petName" TEXT;

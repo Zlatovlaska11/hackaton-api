@@ -12,12 +12,27 @@ datasource db {
   provider = "postgresql"
 }
 
+enum FriendRequestStatus {
+  PENDING
+  ACCEPTED
+}
+
 model Users {
-  userId           Int       @id @default(autoincrement())
-  username         String    @unique
-  password         String
-  sentMessages     Message[] @relation("sentMessages")
-  receivedMessages Message[] @relation("receivedMessages")
+  userId                 Int             @id @default(autoincrement())
+  username               String          @unique
+  password               String
+  petType                String?
+  petName                String?
+  petTypeOption          PetType?        @relation(fields: [petType], references: [code])
+  sentMessages           Message[]       @relation("sentMessages")
+  receivedMessages       Message[]       @relation("receivedMessages")
+  sentFriendRequests     FriendRequest[] @relation("sentFriendRequests")
+  receivedFriendRequests FriendRequest[] @relation("receivedFriendRequests")
+}
+
+model PetType {
+  code  String  @id
+  users Users[]
 }
 
 model Message {
@@ -28,4 +43,21 @@ model Message {
   receiver   Users    @relation("receivedMessages", fields: [receiverId], references: [userId])
   receiverId Int
   createdAt  DateTime @default(now())
+}
+
+model FriendRequest {
+  id          Int                 @id @default(autoincrement())
+  requester   Users               @relation("sentFriendRequests", fields: [requesterId], references: [userId])
+  requesterId Int
+  receiver    Users               @relation("receivedFriendRequests", fields: [receiverId], references: [userId])
+  receiverId  Int
+  pairUserAId Int
+  pairUserBId Int
+  status      FriendRequestStatus @default(PENDING)
+  createdAt   DateTime            @default(now())
+  acceptedAt  DateTime?
+
+  @@unique([pairUserAId, pairUserBId])
+  @@index([requesterId, status])
+  @@index([receiverId, status])
 }
