@@ -9,7 +9,7 @@ const adapter = new PrismaPg(pool as any);
 const prisma = new PrismaClient({ adapter });
 
 async function main() {
-  const john = await prisma.user.upsert({
+  const john = await prisma.users.upsert({
     where: { username: 'john' },
     update: {},
     create: {
@@ -18,7 +18,7 @@ async function main() {
     },
   });
 
-  const maria = await prisma.user.upsert({
+  const maria = await prisma.users.upsert({
     where: { username: 'maria' },
     update: {},
     create: {
