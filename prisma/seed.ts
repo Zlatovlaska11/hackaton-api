@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { PrismaClient } from '@prisma/client';
+import { Behavior, PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import pg from 'pg';
 import * as bcrypt from 'bcrypt';
@@ -21,22 +21,52 @@ async function main() {
   const johnPassword = await bcrypt.hash('changeme', 10);
   const john = await prisma.users.upsert({
     where: { username: 'john' },
-    update: {},
+    update: {
+      petType: 'tree',
+      petName: 'Sprout',
+    },
     create: {
       username: 'john',
       password: johnPassword,
+      petType: 'tree',
+      petName: 'Sprout',
     },
   });
 
   const mariaPassword = await bcrypt.hash('guesswho', 10);
   const maria = await prisma.users.upsert({
     where: { username: 'maria' },
-    update: {},
+    update: {
+      petType: 'water',
+      petName: 'Pearl',
+    },
     create: {
       username: 'maria',
       password: mariaPassword,
+      petType: 'water',
+      petName: 'Pearl',
     },
   });
+
+  if (!(await prisma.pokemon.findFirst({ where: { userId: john.userId } }))) {
+    await prisma.pokemon.create({
+      data: {
+        userId: john.userId,
+        name: 'Sprout',
+        behavior: Behavior.Tree,
+      },
+    });
+  }
+
+  if (!(await prisma.pokemon.findFirst({ where: { userId: maria.userId } }))) {
+    await prisma.pokemon.create({
+      data: {
+        userId: maria.userId,
+        name: 'Pearl',
+        behavior: Behavior.Water,
+      },
+    });
+  }
 
   console.log({ john, maria });
 }

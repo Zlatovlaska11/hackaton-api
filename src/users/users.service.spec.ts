@@ -10,6 +10,9 @@ describe('UsersService', () => {
       findMany: jest.fn(),
       create: jest.fn(),
     },
+    pokemon: {
+      create: jest.fn(),
+    },
     petType: {
       findUnique: jest.fn(),
     },
@@ -76,6 +79,13 @@ describe('UsersService', () => {
         petName: 'Rex',
       },
     });
+    expect(prismaService.pokemon.create).toHaveBeenCalledWith({
+      data: {
+        userId: 9,
+        name: 'Rex',
+        behavior: 'City',
+      },
+    });
   });
 
   it('rejects unsupported pet types', async () => {
@@ -96,6 +106,13 @@ describe('UsersService', () => {
       username: 'alice',
       petType: 'cat',
       petName: 'Luna',
+      pokemon: [
+        {
+          id: 11,
+          name: 'Luna',
+          behavior: 'Tree',
+        },
+      ],
     });
 
     const result = await service.findUserInfoById(2);
@@ -107,6 +124,16 @@ describe('UsersService', () => {
         username: true,
         petType: true,
         petName: true,
+        pokemon: {
+          orderBy: {
+            id: 'asc',
+          },
+          select: {
+            id: true,
+            name: true,
+            behavior: true,
+          },
+        },
       },
     });
     expect(result).toEqual({
@@ -114,6 +141,13 @@ describe('UsersService', () => {
       username: 'alice',
       petType: 'cat',
       petName: 'Luna',
+      pokemon: [
+        {
+          id: 11,
+          name: 'Luna',
+          behavior: 'Tree',
+        },
+      ],
     });
   });
 

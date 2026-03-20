@@ -60,6 +60,13 @@ describe('AuthController', () => {
       username: 'john',
       petType: 'city',
       petName: 'Rex',
+      pokemon: [
+        {
+          id: 3,
+          name: 'Rex',
+          behavior: 'City',
+        },
+      ],
     });
 
     const result = await controller.getProfile({
@@ -74,6 +81,13 @@ describe('AuthController', () => {
       username: 'john',
       petType: 'city',
       petName: 'Rex',
+      pokemon: [
+        {
+          id: 3,
+          name: 'Rex',
+          behavior: 'City',
+        },
+      ],
     });
   });
 
@@ -83,6 +97,13 @@ describe('AuthController', () => {
       username: 'maria',
       petType: 'water',
       petName: 'Pearl',
+      pokemon: [
+        {
+          id: 4,
+          name: 'Pearl',
+          behavior: 'Water',
+        },
+      ],
     });
 
     const result = await controller.getMe({
@@ -97,6 +118,13 @@ describe('AuthController', () => {
       username: 'maria',
       petType: 'water',
       petName: 'Pearl',
+      pokemon: [
+        {
+          id: 4,
+          name: 'Pearl',
+          behavior: 'Water',
+        },
+      ],
     });
   });
 });

@@ -99,8 +99,15 @@ curl -H "Authorization: Bearer <YOUR_TOKEN>" \
 {
   "userId": 1,
   "username": "john",
-  "petType": null,
-  "petName": null
+  "petType": "tree",
+  "petName": "Sprout",
+  "pokemon": [
+    {
+      "id": 1,
+      "name": "Sprout",
+      "behavior": "Tree"
+    }
+  ]
 }
 ```
 
@@ -122,8 +129,15 @@ curl -H "Authorization: Bearer <YOUR_TOKEN>" \
 {
   "userId": 1,
   "username": "john",
-  "petType": null,
-  "petName": null
+  "petType": "tree",
+  "petName": "Sprout",
+  "pokemon": [
+    {
+      "id": 1,
+      "name": "Sprout",
+      "behavior": "Tree"
+    }
+  ]
 }
 ```
 
@@ -180,8 +194,15 @@ curl -H "Authorization: Bearer <YOUR_TOKEN>" \
 {
   "userId": 2,
   "username": "maria",
-  "petType": null,
-  "petName": null
+  "petType": "water",
+  "petName": "Pearl",
+  "pokemon": [
+    {
+      "id": 2,
+      "name": "Pearl",
+      "behavior": "Water"
+    }
+  ]
 }
 ```
 
@@ -396,7 +417,103 @@ curl -X POST http://localhost:3001/chat/messages \
 }
 ```
 
-## 6. Troubleshooting
+## 6. Routes & Pokemon Paths
+
+All route endpoints require `Authorization: Bearer <YOUR_TOKEN>`.
+
+Optional environment variables:
+
+- `ROUTE_AI_MODEL`: enables OpenAI-assisted route planning when used together with `OPENAI_API_KEY`
+- `OPENROUTESERVICE_API_KEY`: enables route geometry lookup from OpenRouteService
+- `OPENROUTESERVICE_PROFILE`: routing profile, default `foot-walking`
+- `ROUTE_POINT_RADIUS_METERS`: radius for `is-on-point`, default `30`
+
+#### A. Create Path
+
+Creates a new route for the selected pokemon. The endpoint accepts headers exactly as requested, but the same values can also be sent as query params for easier testing.
+
+`point` supports formats like `50.087,14.421` or `{"lat":50.087,"lng":14.421}`.
+`distance` is interpreted in meters by default, or you can send `1.2km`.
+
+**Request:**
+
+```bash
+curl -H "Authorization: Bearer <YOUR_TOKEN>" \
+     -H "point: 50.087,14.421" \
+     -H "distance: 1200" \
+     -H "id_pokemona: 1" \
+     http://localhost:3001/routes/create-path
+```
+
+**Success Response (200 OK):**
+
+```json
+{
+  "route": {
+    "id": 12,
+    "userId": 1,
+    "pokemonId": 1,
+    "ended": false,
+    "inProgress": false,
+    "donePercent": 0
+  },
+  "points": [
+    {
+      "id": 101,
+      "lat": 50.087,
+      "lng": 14.421,
+      "visited": false
+    }
+  ],
+  "requestedDistanceMeters": 1200,
+  "radiusMeters": 30,
+  "planner": {
+    "source": "heuristic",
+    "reason": "Water pokemon prefers a smoother curved walk that feels like following a shoreline or riverbank."
+  }
+}
+```
+
+#### B. Get Route Points
+
+**Request:**
+
+```bash
+curl -H "Authorization: Bearer <YOUR_TOKEN>" \
+     http://localhost:3001/routes/12/points
+```
+
+#### C. Start Path
+
+**Request:**
+
+```bash
+curl -X POST http://localhost:3001/routes/12/start-path \
+     -H "Authorization: Bearer <YOUR_TOKEN>"
+```
+
+#### D. Check If Device Is On Point
+
+Without `pointId`, the API checks the next unvisited point on the route.
+
+**Request:**
+
+```bash
+curl -H "Authorization: Bearer <YOUR_TOKEN>" \
+     -H "point: 50.08705,14.42105" \
+     http://localhost:3001/routes/12/is-on-point
+```
+
+#### E. Stop Path
+
+**Request:**
+
+```bash
+curl -X POST http://localhost:3001/routes/12/stop-path \
+     -H "Authorization: Bearer <YOUR_TOKEN>"
+```
+
+## 7. Troubleshooting
 
 - **Check Container Status:** `docker ps`
 - **View App Logs:** `npm run start:dev` (check the console output)

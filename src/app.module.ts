@@ -7,6 +7,7 @@ import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ChatModule } from './chat/chat.module';
+import { RoutesModule } from './routes/routes.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { ChatModule } from './chat/chat.module';
     AuthModule,
     QuestionsModule,
     ChatModule,
+    RoutesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

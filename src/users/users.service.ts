@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { Users } from '@prisma/client';
+import { Behavior, Users } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
 const userSummarySelect = {
@@ -18,6 +18,16 @@ const userInfoSelect = {
   ...userSummarySelect,
   petType: true,
   petName: true,
+  pokemon: {
+    orderBy: {
+      id: 'asc',
+    },
+    select: {
+      id: true,
+      name: true,
+      behavior: true,
+    },
+  },
 } as const;
 
 const friendRequestSelect = {
@@ -43,6 +53,7 @@ export type UserSummary = {
 export type UserInfo = UserSummary & {
   petType: string | null;
   petName: string | null;
+  pokemon: PokemonSummary[];
 };
 
 export type ChatUserSummary = UserSummary;
@@ -55,6 +66,12 @@ export type FriendRequestListItem = {
   id: number;
   createdAt: Date;
   user: UserSummary;
+};
+
+export type PokemonSummary = {
+  id: number;
+  name: string;
+  behavior: Behavior;
 };
 
 @Injectable()
@@ -77,15 +94,28 @@ export class UsersService {
   }): Promise<Users> {
     const hashedPassword = await bcrypt.hash(data.password, 10);
     const petType = await this.normalizePetType(data.petType);
+    const petName = this.normalizeOptionalString(data.petName);
 
-    return this.prisma.users.create({
+    const user = await this.prisma.users.create({
       data: {
         username: data.username,
         password: hashedPassword,
         petType,
-        petName: this.normalizeOptionalString(data.petName),
+        petName,
       },
     });
+
+    if (petType) {
+      await this.prisma.pokemon.create({
+        data: {
+          userId: user.userId,
+          name: petName ?? `${data.username}'s companion`,
+          behavior: this.mapPetTypeToBehavior(petType),
+        },
+      });
+    }
+
+    return user;
   }
 
   async findById(userId: number): Promise<ChatUserSummary | null> {
@@ -329,5 +359,20 @@ export class UsersService {
     }
 
     return petType.code;
+  }
+
+  private mapPetTypeToBehavior(petType: string): Behavior {
+    switch (petType) {
+      case 'tree':
+        return Behavior.Tree;
+      case 'water':
+        return Behavior.Water;
+      case 'city':
+        return Behavior.City;
+      default:
+        throw new BadRequestException(
+          'petType must be one of: city, water, tree',
+        );
+    }
   }
 }
