@@ -34,7 +34,24 @@ The API will be available at `http://localhost:3001`.
 
 ### Authentication
 
-#### A. Login
+#### A. Register
+Create a new user and receive a JWT access token.
+
+**Request:**
+```bash
+curl -X POST http://localhost:3001/auth/register \
+     -H "Content-Type: application/json" \
+     -d '{"username":"newuser","password":"mypassword"}'
+```
+
+**Success Response (201 Created):**
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
+
+#### B. Login
 Exchange your credentials for a JWT access token.
 
 **Request:**
@@ -51,7 +68,7 @@ curl -X POST http://localhost:3001/auth/login \
 }
 ```
 
-#### B. Get Profile (Protected Route)
+#### C. Get Profile (Protected Route)
 Access your user profile using the JWT token obtained from login.
 
 **Request:**
