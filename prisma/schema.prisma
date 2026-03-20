@@ -13,7 +13,19 @@ datasource db {
 }
 
 model Users {
-  userId   Int      @id @default(autoincrement())
-  username String   @unique
-  password String
+  userId           Int       @id @default(autoincrement())
+  username         String    @unique
+  password         String
+  sentMessages     Message[] @relation("sentMessages")
+  receivedMessages Message[] @relation("receivedMessages")
+}
+
+model Message {
+  id         Int      @id @default(autoincrement())
+  text       String
+  sender     Users    @relation("sentMessages", fields: [senderId], references: [userId])
+  senderId   Int
+  receiver   Users    @relation("receivedMessages", fields: [receiverId], references: [userId])
+  receiverId Int
+  createdAt  DateTime @default(now())
 }

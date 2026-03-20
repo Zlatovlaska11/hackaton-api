@@ -97,7 +97,21 @@ If the token is missing or invalid:
 
 ---
 
-## 4. Troubleshooting
+---
+
+## 4. WebSocket Chat
+
+The API provides a real-time chat over WebSockets using Socket.io, backed by PostgreSQL.
+
+- **URL:** `ws://localhost:3001`
+- **Events Protocol:**
+  1. Emit **`auth`**: Pass payload `{"token": "YOUR_JWT_HERE"}` as the very first message. The server will authenticate you and emit `auth_result` with success status. You must authenticate before sending messages.
+  2. Emit **`send_message`**: Pass payload `{"receiverId": 2, "text": "Hello!"}` to send a message. The server identifies your user as the sender, saves the message to the database, and then broadcasts it.
+  3. Listen for **`receive_message`**: To receive incoming broadcast messages from the server.
+
+---
+
+## 5. Troubleshooting
 
 - **Check Container Status:** `docker ps`
 - **View App Logs:** `npm run start:dev` (check the console output)
