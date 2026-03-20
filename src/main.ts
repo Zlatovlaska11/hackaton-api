@@ -1,7 +1,12 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
+<<<<<<< HEAD
 import { ConfigService } from '@nestjs/config';
+=======
+import * as dotenv from 'dotenv';
+>>>>>>> main
 
+dotenv.config(); //dává hodnoty do process.env
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const configService = app.get(ConfigService);
