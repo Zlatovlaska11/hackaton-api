@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaService } from '../prisma/prisma.service';
+import { UsersService } from '../users/users.service';
 import { RoutesService } from './routes.service';
 
 describe('RoutesService', () => {
@@ -18,6 +19,9 @@ describe('RoutesService', () => {
     },
     $transaction: jest.fn(),
   };
+  const usersService = {
+    recordUserLocation: jest.fn(),
+  };
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -28,6 +32,10 @@ describe('RoutesService', () => {
         {
           provide: PrismaService,
           useValue: prismaService,
+        },
+        {
+          provide: UsersService,
+          useValue: usersService,
         },
       ],
     }).compile();
@@ -134,6 +142,10 @@ describe('RoutesService', () => {
       pokemonId: 7,
     });
 
+    expect(usersService.recordUserLocation).toHaveBeenCalledWith(1, {
+      lat: 50.087,
+      lng: 14.421,
+    });
     expect(prismaService.pokemon.findFirst).toHaveBeenCalledWith({
       where: {
         id: 7,
@@ -255,6 +267,10 @@ describe('RoutesService', () => {
       distanceMeters: 1200,
     });
 
+    expect(usersService.recordUserLocation).toHaveBeenCalledWith(1, {
+      lat: 50.087,
+      lng: 14.421,
+    });
     expect(prismaService.pokemon.findFirst).toHaveBeenCalledWith({
       where: {
         userId: 1,
@@ -507,6 +523,10 @@ describe('RoutesService', () => {
       point: { lat: 50.08704, lng: 14.42103 },
     });
 
+    expect(usersService.recordUserLocation).toHaveBeenCalledWith(1, {
+      lat: 50.08704,
+      lng: 14.42103,
+    });
     expect(result.isOnPoint).toBe(true);
     expect(result.pointId).toBe(42);
     expect(result.radiusMeters).toBe(30);

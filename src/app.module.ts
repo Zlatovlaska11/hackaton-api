@@ -8,6 +8,7 @@ import { AuthModule } from './auth/auth.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ChatModule } from './chat/chat.module';
 import { RoutesModule } from './routes/routes.module';
+import { PokemonModule } from './pokemon/pokemon.module';
 
 @Module({
   imports: [
@@ -21,9 +22,9 @@ import { RoutesModule } from './routes/routes.module';
     QuestionsModule,
     ChatModule,
     RoutesModule,
+    PokemonModule,
   ],
   controllers: [AppController],
   providers: [AppService],
 })
-
-export class AppModule { }
+export class AppModule {}

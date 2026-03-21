@@ -9,6 +9,7 @@ import { Server, Socket } from 'socket.io';
 import { JwtService } from '@nestjs/jwt';
 import { ChatService } from './chat.service';
 import { HttpException } from '@nestjs/common';
+import { UsersService } from '../users/users.service';
 
 @WebSocketGateway({
   cors: {
@@ -22,6 +23,7 @@ export class ChatGateway {
   constructor(
     private jwtService: JwtService,
     private chatService: ChatService,
+    private usersService: UsersService,
   ) {}
 
   @SubscribeMessage('auth')
@@ -31,6 +33,7 @@ export class ChatGateway {
   ) {
     try {
       const payload = this.jwtService.verify(data.token);
+      await this.usersService.markUserActive(payload.sub);
       client.data.user = payload;
       client.join(this.getUserRoom(payload.sub));
       client.emit('auth_result', { success: true });
@@ -54,6 +57,7 @@ export class ChatGateway {
     const senderId = client.data.user.sub;
 
     try {
+      await this.usersService.markUserActive(senderId);
       const message = await this.chatService.createMessage(
         senderId,
         data.receiverId,

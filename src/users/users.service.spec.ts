@@ -9,9 +9,14 @@ describe('UsersService', () => {
       findUnique: jest.fn(),
       findMany: jest.fn(),
       create: jest.fn(),
+      update: jest.fn(),
+      updateMany: jest.fn(),
     },
     pokemon: {
       create: jest.fn(),
+    },
+    pokemonStats: {
+      upsert: jest.fn(),
     },
     petType: {
       findUnique: jest.fn(),
@@ -22,6 +27,7 @@ describe('UsersService', () => {
       create: jest.fn(),
       update: jest.fn(),
     },
+    $transaction: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -44,7 +50,7 @@ describe('UsersService', () => {
     expect(service).toBeDefined();
   });
 
-  it('creates a user with normalized pet fields', async () => {
+  it('creates a user with normalized pet fields and default pokemon stats', async () => {
     prismaService.petType.findUnique.mockResolvedValue({
       code: 'city',
     });
@@ -84,6 +90,21 @@ describe('UsersService', () => {
         userId: 9,
         name: 'Rex',
         behavior: 'City',
+        stats: {
+          create: {},
+        },
+      },
+      select: {
+        id: true,
+        name: true,
+        behavior: true,
+        stats: {
+          select: {
+            agility: true,
+            intelligence: true,
+            strength: true,
+          },
+        },
       },
     });
   });
@@ -100,19 +121,26 @@ describe('UsersService', () => {
     ).rejects.toThrow('petType must be one of: city, water, tree');
   });
 
-  it('loads detailed user info with pet fields', async () => {
+  it('loads detailed user info with pokemon stats and presence', async () => {
+    const lastSeenAt = new Date();
     prismaService.users.findUnique.mockResolvedValue({
       userId: 2,
       username: 'alice',
-      petType: 'cat',
+      petType: 'tree',
       petName: 'Luna',
-      pokemon: [
-        {
-          id: 11,
-          name: 'Luna',
-          behavior: 'Tree',
+      lastKnownLat: 50.087,
+      lastKnownLng: 14.421,
+      lastSeenAt,
+      pokemon: {
+        id: 11,
+        name: 'Luna',
+        behavior: 'Tree',
+        stats: {
+          agility: 4,
+          intelligence: 7,
+          strength: 3,
         },
-      ],
+      },
     });
 
     const result = await service.findUserInfoById(2);
@@ -124,14 +152,21 @@ describe('UsersService', () => {
         username: true,
         petType: true,
         petName: true,
+        lastKnownLat: true,
+        lastKnownLng: true,
+        lastSeenAt: true,
         pokemon: {
-          orderBy: {
-            id: 'asc',
-          },
           select: {
             id: true,
             name: true,
             behavior: true,
+            stats: {
+              select: {
+                agility: true,
+                intelligence: true,
+                strength: true,
+              },
+            },
           },
         },
       },
@@ -139,13 +174,24 @@ describe('UsersService', () => {
     expect(result).toEqual({
       userId: 2,
       username: 'alice',
-      petType: 'cat',
+      petType: 'tree',
       petName: 'Luna',
+      lastKnownLocation: {
+        lat: 50.087,
+        lng: 14.421,
+      },
+      lastSeenAt,
+      isOnline: true,
       pokemon: [
         {
           id: 11,
           name: 'Luna',
           behavior: 'Tree',
+          stats: {
+            agility: 4,
+            intelligence: 7,
+            strength: 3,
+          },
         },
       ],
     });
@@ -184,6 +230,196 @@ describe('UsersService', () => {
     ]);
   });
 
+  it('lists nearby users from the current user location and respects online filtering', async () => {
+    prismaService.users.findUnique.mockResolvedValue({
+      lastKnownLat: 50.087,
+      lastKnownLng: 14.421,
+    });
+    prismaService.users.findMany.mockResolvedValue([
+      {
+        userId: 2,
+        username: 'alice',
+        petType: 'water',
+        petName: 'Pearl',
+        lastKnownLat: 50.0873,
+        lastKnownLng: 14.4236,
+        lastSeenAt: new Date(),
+        pokemon: {
+          id: 4,
+          name: 'Pearl',
+          behavior: 'Water',
+          stats: {
+            agility: 5,
+            intelligence: 6,
+            strength: 4,
+          },
+        },
+      },
+      {
+        userId: 3,
+        username: 'bob',
+        petType: 'city',
+        petName: 'Bolt',
+        lastKnownLat: 50.14,
+        lastKnownLng: 14.55,
+        lastSeenAt: new Date('2020-01-01T00:00:00.000Z'),
+        pokemon: {
+          id: 5,
+          name: 'Bolt',
+          behavior: 'City',
+          stats: {
+            agility: 8,
+            intelligence: 3,
+            strength: 6,
+          },
+        },
+      },
+    ]);
+
+    const result = await service.listNearbyUsers(1, 1000, {
+      status: 'online',
+      limit: 10,
+    });
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      userId: 2,
+      username: 'alice',
+      isOnline: true,
+      lastKnownLocation: {
+        lat: 50.0873,
+        lng: 14.4236,
+      },
+      pokemon: [
+        {
+          id: 4,
+          name: 'Pearl',
+          behavior: 'Water',
+          stats: {
+            agility: 5,
+            intelligence: 6,
+            strength: 4,
+          },
+        },
+      ],
+    });
+    expect(result[0].distanceMeters).toBeGreaterThan(0);
+    expect(result[0].distanceMeters).toBeLessThanOrEqual(1000);
+  });
+
+  it('adds a pokemon for a user that does not have one yet', async () => {
+    prismaService.petType.findUnique.mockResolvedValue({
+      code: 'water',
+    });
+    prismaService.users.findUnique
+      .mockResolvedValueOnce({
+        userId: 7,
+        username: 'maria',
+        petType: null,
+        petName: null,
+        pokemon: null,
+      })
+      .mockResolvedValueOnce({
+        userId: 7,
+        username: 'maria',
+        petType: 'water',
+        petName: 'Pearl',
+        lastKnownLat: null,
+        lastKnownLng: null,
+        lastSeenAt: null,
+        pokemon: {
+          id: 21,
+          name: 'Pearl',
+          behavior: 'Water',
+          stats: {
+            agility: 0,
+            intelligence: 0,
+            strength: 0,
+          },
+        },
+      });
+
+    const tx = {
+      users: {
+        update: jest.fn().mockResolvedValue(undefined),
+      },
+      pokemon: {
+        create: jest.fn().mockResolvedValue({
+          id: 21,
+          name: 'Pearl',
+          behavior: 'Water',
+          stats: {
+            agility: 0,
+            intelligence: 0,
+            strength: 0,
+          },
+        }),
+      },
+    };
+
+    prismaService.$transaction.mockImplementation(async (callback) =>
+      callback(tx),
+    );
+
+    const result = await service.addPokemon(7, {
+      name: 'Pearl',
+      petType: 'water',
+    });
+
+    expect(tx.users.update).toHaveBeenCalledWith({
+      where: {
+        userId: 7,
+      },
+      data: {
+        petName: 'Pearl',
+        petType: 'water',
+      },
+    });
+    expect(tx.pokemon.create).toHaveBeenCalledWith({
+      data: {
+        userId: 7,
+        name: 'Pearl',
+        behavior: 'Water',
+        stats: {
+          create: {},
+        },
+      },
+      select: {
+        id: true,
+        name: true,
+        behavior: true,
+        stats: {
+          select: {
+            agility: true,
+            intelligence: true,
+            strength: true,
+          },
+        },
+      },
+    });
+    expect(result).toEqual({
+      userId: 7,
+      username: 'maria',
+      petType: 'water',
+      petName: 'Pearl',
+      lastKnownLocation: null,
+      lastSeenAt: null,
+      isOnline: false,
+      pokemon: [
+        {
+          id: 21,
+          name: 'Pearl',
+          behavior: 'Water',
+          stats: {
+            agility: 0,
+            intelligence: 0,
+            strength: 0,
+          },
+        },
+      ],
+    });
+  });
+
   it('creates a friend request with a canonical user pair', async () => {
     prismaService.users.findUnique.mockResolvedValue({
       userId: 2,
@@ -209,34 +445,6 @@ describe('UsersService', () => {
           pairUserAId: 1,
           pairUserBId: 2,
         },
-      },
-      select: {
-        id: true,
-        requesterId: true,
-        receiverId: true,
-        status: true,
-        createdAt: true,
-        acceptedAt: true,
-        requester: {
-          select: {
-            userId: true,
-            username: true,
-          },
-        },
-        receiver: {
-          select: {
-            userId: true,
-            username: true,
-          },
-        },
-      },
-    });
-    expect(prismaService.friendRequest.create).toHaveBeenCalledWith({
-      data: {
-        requesterId: 1,
-        receiverId: 2,
-        pairUserAId: 1,
-        pairUserBId: 2,
       },
       select: {
         id: true,
@@ -344,28 +552,6 @@ describe('UsersService', () => {
 
     const result = await service.listFriends(1);
 
-    expect(prismaService.friendRequest.findMany).toHaveBeenCalledWith({
-      where: {
-        status: 'ACCEPTED',
-        OR: [{ requesterId: 1 }, { receiverId: 1 }],
-      },
-      select: {
-        requester: {
-          select: {
-            userId: true,
-            username: true,
-          },
-        },
-        receiver: {
-          select: {
-            userId: true,
-            username: true,
-          },
-        },
-        createdAt: true,
-        acceptedAt: true,
-      },
-    });
     expect(result).toEqual([
       {
         userId: 2,

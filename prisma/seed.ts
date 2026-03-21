@@ -54,6 +54,9 @@ async function main() {
         userId: john.userId,
         name: 'Sprout',
         behavior: Behavior.Tree,
+        stats: {
+          create: {},
+        },
       },
     });
   }
@@ -64,6 +67,27 @@ async function main() {
         userId: maria.userId,
         name: 'Pearl',
         behavior: Behavior.Water,
+        stats: {
+          create: {},
+        },
+      },
+    });
+  }
+
+  const pokemon = await prisma.pokemon.findMany({
+    select: {
+      id: true,
+    },
+  });
+
+  for (const item of pokemon) {
+    await prisma.pokemonStats.upsert({
+      where: {
+        pokemonId: item.id,
+      },
+      update: {},
+      create: {
+        pokemonId: item.id,
       },
     });
   }

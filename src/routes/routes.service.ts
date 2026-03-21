@@ -6,6 +6,7 @@ import {
 import { Behavior } from '@prisma/client';
 import OpenAI from 'openai';
 import { PrismaService } from '../prisma/prisma.service';
+import { UsersService } from '../users/users.service';
 
 type GeoPoint = {
   lat: number;
@@ -119,9 +120,13 @@ export class RoutesService {
     ),
   );
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly usersService: UsersService,
+  ) {}
 
   async createPath(userId: number, input: CreatePathInput) {
+    await this.usersService.recordUserLocation(userId, input.point);
     const distanceMeters = this.normalizeRequestedDistance(
       input.distanceMeters,
     );
@@ -267,6 +272,7 @@ export class RoutesService {
   }
 
   async isOnPoint(userId: number, routeId: number, input: IsOnPointInput) {
+    await this.usersService.recordUserLocation(userId, input.point);
     const route = await this.getOwnedRouteOrThrow(userId, routeId);
     const orderedPoints = await this.getOrderedRoutePoints(routeId);
 

@@ -31,13 +31,16 @@ model Users {
   password               String
   petType                String?
   petName                String?
+  lastKnownLat           Float?          @map("last_known_lat")
+  lastKnownLng           Float?          @map("last_known_lng")
+  lastSeenAt             DateTime?       @map("last_seen_at")
   petTypeOption          PetType?        @relation(fields: [petType], references: [code])
   sentMessages           Message[]       @relation("sentMessages")
   receivedMessages       Message[]       @relation("receivedMessages")
   sentFriendRequests     FriendRequest[] @relation("sentFriendRequests")
   receivedFriendRequests FriendRequest[] @relation("receivedFriendRequests")
   routes                 Route[]
-  pokemon                Pokemon[]
+  pokemon                Pokemon?
 }
 
 model PetType {
@@ -73,30 +76,58 @@ model FriendRequest {
 }
 
 model Pokemon {
-  id       Int      @id @default(autoincrement())
-  userId   Int      @map("user_id")
-  name     String
-  behavior Behavior
-  user     Users    @relation(fields: [userId], references: [userId], onDelete: Cascade)
-  routes   Route[]
+  id           Int                 @id @default(autoincrement())
+  userId       Int                 @unique @map("user_id")
+  name         String
+  behavior     Behavior
+  user         Users               @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  routes       Route[]
+  stats        PokemonStats?
+  friendshipsA PokemonFriendship[] @relation("PokemonA")
+  friendshipsB PokemonFriendship[] @relation("PokemonB")
 
-  @@index([userId])
   @@map("pokemon")
 }
 
-model Route {
+model PokemonFriendship {
   id         Int      @id @default(autoincrement())
-  userId     Int      @map("user_id")
-  pokemonId  Int      @map("pokemon_id")
-  ended      Boolean  @default(false)
-  inProgress Boolean  @default(false) @map("in_progress")
-  donePercent Float   @default(0) @map("done_percent")
+  pokemonAId Int      @map("pokemon_a_id")
+  pokemonBId Int      @map("pokemon_b_id")
+  pokemonA   Pokemon  @relation("PokemonA", fields: [pokemonAId], references: [id], onDelete: Cascade)
+  pokemonB   Pokemon  @relation("PokemonB", fields: [pokemonBId], references: [id], onDelete: Cascade)
+  friendship Int      @default(0)
   createdAt  DateTime @default(now()) @map("created_at")
-  startedAt  DateTime? @map("started_at")
-  endedAt    DateTime? @map("ended_at")
-  user       Users    @relation(fields: [userId], references: [userId], onDelete: Cascade)
-  pokemon    Pokemon  @relation(fields: [pokemonId], references: [id], onDelete: Cascade)
-  points     Point[]
+
+  @@unique([pokemonAId, pokemonBId])
+  @@index([pokemonAId])
+  @@index([pokemonBId])
+  @@map("pokemon_friendships")
+}
+
+model PokemonStats {
+  id           Int     @id @default(autoincrement())
+  pokemonId    Int     @unique @map("pokemon_id")
+  agility      Int     @default(0)
+  intelligence Int     @default(0)
+  strength     Int     @default(0)
+  pokemon      Pokemon @relation(fields: [pokemonId], references: [id], onDelete: Cascade)
+
+  @@map("pokemon_stats")
+}
+
+model Route {
+  id          Int       @id @default(autoincrement())
+  userId      Int       @map("user_id")
+  pokemonId   Int       @map("pokemon_id")
+  ended       Boolean   @default(false)
+  inProgress  Boolean   @default(false) @map("in_progress")
+  donePercent Float     @default(0) @map("done_percent")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  startedAt   DateTime? @map("started_at")
+  endedAt     DateTime? @map("ended_at")
+  user        Users     @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  pokemon     Pokemon   @relation(fields: [pokemonId], references: [id], onDelete: Cascade)
+  points      Point[]
 
   @@index([userId, inProgress])
   @@index([pokemonId])
@@ -104,14 +135,14 @@ model Route {
 }
 
 model Point {
-  id              Int    @id @default(autoincrement())
+  id              Int     @id @default(autoincrement())
   lat             Float
   lng             Float
   visited         Boolean @default(false)
-  previousPointId Int?   @map("previous_point_id")
-  nextPointId     Int?   @map("next_point_id")
-  routeId         Int    @map("route_id")
-  route           Route  @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  previousPointId Int?    @map("previous_point_id")
+  nextPointId     Int?    @map("next_point_id")
+  routeId         Int     @map("route_id")
+  route           Route   @relation(fields: [routeId], references: [id], onDelete: Cascade)
 
   @@index([routeId])
   @@map("points")

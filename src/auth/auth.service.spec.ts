@@ -8,6 +8,7 @@ describe('AuthService', () => {
   const usersService = {
     create: jest.fn(),
     findOne: jest.fn(),
+    markUserActive: jest.fn(),
   };
   const jwtService = {
     sign: jest.fn(),
@@ -52,6 +53,7 @@ describe('AuthService', () => {
       petType: 'city',
       petName: 'Rex',
     });
+    expect(usersService.markUserActive).toHaveBeenCalledWith(12);
     expect(result).toEqual({ access_token: 'jwt-token' });
   });
 });
