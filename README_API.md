@@ -423,17 +423,21 @@ All route endpoints require `Authorization: Bearer <YOUR_TOKEN>`.
 
 Optional environment variables:
 
-- `ROUTE_AI_MODEL`: enables OpenAI-assisted route planning when used together with `OPENAI_API_KEY`
-- `OPENROUTESERVICE_API_KEY`: enables route geometry lookup from OpenRouteService
-- `OPENROUTESERVICE_PROFILE`: routing profile, default `foot-walking`
+- `OPENAI_API_KEY`: enables OpenAI-assisted route planning
+- `ROUTE_AI_MODEL`: optional override for the route planner model. If omitted and `OPENAI_API_KEY` is set, the API uses `gpt-5-mini`
+- `OSRM_BASE_URL`: OpenStreetMap routing service base URL, default `https://router.project-osrm.org`
+- `OSRM_PROFILE`: routing profile, default `foot`
 - `ROUTE_POINT_RADIUS_METERS`: radius for `is-on-point`, default `30`
 
 #### A. Create Path
 
-Creates a new route for the selected pokemon. The endpoint accepts headers exactly as requested, but the same values can also be sent as query params for easier testing.
+Creates a new route for the selected pokemon. The API now prefers OpenStreetMap-based routing through OSRM: it picks a destination candidate based on the requested trip length, checks several routed options, and keeps the one whose actual routed distance is closest to your target. With `OPENAI_API_KEY` configured, OpenAI still helps choose the route direction and style. If OSRM is unavailable, the service falls back to local interpolation.
+
+The endpoint accepts headers exactly as requested, but the same values can also be sent as query params for easier testing.
 
 `point` supports formats like `50.087,14.421` or `{"lat":50.087,"lng":14.421}`.
 `distance` is interpreted in meters by default, or you can send `1.2km`.
+For the pokemon id, the API accepts query param `pokemonId=1` and also the legacy `id_pokemona=1`. If you omit it, the API automatically uses the first pokemon owned by the authenticated user.
 
 **Request:**
 
@@ -443,6 +447,13 @@ curl -H "Authorization: Bearer <YOUR_TOKEN>" \
      -H "distance: 1200" \
      -H "id_pokemona: 1" \
      http://localhost:3001/routes/create-path
+```
+
+Browser-friendly query example:
+
+```bash
+curl -H "Authorization: Bearer <YOUR_TOKEN>" \
+     "http://localhost:3001/routes/create-path?point=50.087,14.421&distance=1200&pokemonId=1"
 ```
 
 **Success Response (200 OK):**

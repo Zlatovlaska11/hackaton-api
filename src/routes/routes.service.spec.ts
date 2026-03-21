@@ -53,6 +53,9 @@ describe('RoutesService', () => {
       lat: 50.0873,
       lng: 14.4236,
     });
+    jest
+      .spyOn(service as any, 'tryGenerateRouteWithOpenStreetMap')
+      .mockResolvedValue(null);
     jest.spyOn(service as any, 'generateRoutePoints').mockResolvedValue([
       { lat: 50.0871, lng: 14.4211 },
       { lat: 50.0872, lng: 14.4224 },
@@ -180,6 +183,182 @@ describe('RoutesService', () => {
     expect(result.planner).toEqual({
       source: 'heuristic',
       reason: 'test plan',
+    });
+  });
+
+  it('auto-selects the first owned pokemon when pokemonId is omitted', async () => {
+    prismaService.pokemon.findFirst.mockResolvedValue({
+      id: 3,
+      name: 'Sprout',
+      behavior: 'Tree',
+    });
+
+    jest.spyOn(service as any, 'planTrip').mockResolvedValue({
+      source: 'heuristic',
+      bearing: 45,
+      distanceRatio: 0.6,
+      scenicCurve: 0.1,
+      reason: 'auto-selected',
+      waypoints: [],
+    });
+    jest.spyOn(service as any, 'buildDestination').mockReturnValue({
+      lat: 50.09,
+      lng: 14.43,
+    });
+    jest
+      .spyOn(service as any, 'tryGenerateRouteWithOpenStreetMap')
+      .mockResolvedValue(null);
+    jest.spyOn(service as any, 'generateRoutePoints').mockResolvedValue([
+      { lat: 50.087, lng: 14.421 },
+      { lat: 50.09, lng: 14.43 },
+    ]);
+
+    const tx = {
+      route: {
+        create: jest.fn().mockResolvedValue({
+          id: 14,
+          userId: 1,
+          pokemonId: 3,
+        }),
+      },
+      point: {
+        create: jest
+          .fn()
+          .mockResolvedValueOnce({
+            id: 51,
+            lat: 50.087,
+            lng: 14.421,
+            visited: false,
+            previousPointId: null,
+            nextPointId: null,
+            routeId: 14,
+          })
+          .mockResolvedValueOnce({
+            id: 52,
+            lat: 50.09,
+            lng: 14.43,
+            visited: false,
+            previousPointId: 51,
+            nextPointId: null,
+            routeId: 14,
+          }),
+        update: jest.fn().mockResolvedValue(undefined),
+      },
+    };
+
+    prismaService.$transaction.mockImplementation(async (callback) =>
+      callback(tx),
+    );
+
+    await service.createPath(1, {
+      point: { lat: 50.087, lng: 14.421 },
+      distanceMeters: 1200,
+    });
+
+    expect(prismaService.pokemon.findFirst).toHaveBeenCalledWith({
+      where: {
+        userId: 1,
+      },
+      orderBy: {
+        id: 'asc',
+      },
+      select: {
+        id: true,
+        name: true,
+        behavior: true,
+      },
+    });
+    expect(tx.route.create).toHaveBeenCalledWith({
+      data: {
+        userId: 1,
+        pokemonId: 3,
+      },
+      select: expect.any(Object),
+    });
+  });
+
+  it('prefers the OSM route whose real distance is closest to the requested trip length', async () => {
+    const fetchSpy = jest
+      .spyOn(global, 'fetch')
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          routes: [
+            {
+              distance: 910,
+              geometry: {
+                coordinates: [
+                  [14.421, 50.087],
+                  [14.425, 50.09],
+                ],
+              },
+            },
+          ],
+        }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          routes: [
+            {
+              distance: 1190,
+              geometry: {
+                coordinates: [
+                  [14.421, 50.087],
+                  [14.429, 50.091],
+                ],
+              },
+            },
+          ],
+        }),
+      } as Response)
+      .mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          routes: [
+            {
+              distance: 1460,
+              geometry: {
+                coordinates: [
+                  [14.421, 50.087],
+                  [14.434, 50.094],
+                ],
+              },
+            },
+          ],
+        }),
+      } as Response);
+
+    const result = await (service as any).tryGenerateRouteWithOpenStreetMap(
+      { lat: 50.087, lng: 14.421 },
+      1200,
+      {
+        source: 'heuristic',
+        bearing: 90,
+        distanceRatio: 0.65,
+        scenicCurve: 0.1,
+        reason: 'test',
+        waypoints: [],
+      },
+    );
+
+    expect(fetchSpy).toHaveBeenCalledTimes(7);
+    expect(result).toEqual({
+      destination: {
+        lat: 50.091,
+        lng: 14.429,
+      },
+      distanceMeters: 1190,
+      points: [
+        {
+          lat: 50.087,
+          lng: 14.421,
+        },
+        {
+          lat: 50.091,
+          lng: 14.429,
+        },
+      ],
     });
   });
 

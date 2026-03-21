@@ -15,7 +15,7 @@ type GeoPoint = {
 type CreatePathInput = {
   point: GeoPoint;
   distanceMeters: number;
-  pokemonId: number;
+  pokemonId?: number;
 };
 
 type IsOnPointInput = {
@@ -33,12 +33,25 @@ type RoutePointRecord = {
   routeId: number;
 };
 
+type PlannedWaypoint = {
+  progress: number;
+  lateralOffsetRatio: number;
+  note: string;
+};
+
 type PlannedTrip = {
   source: 'ai' | 'heuristic';
   bearing: number;
   distanceRatio: number;
   scenicCurve: number;
   reason: string;
+  waypoints: PlannedWaypoint[];
+};
+
+type RoutedPathPlan = {
+  destination: GeoPoint;
+  distanceMeters: number;
+  points: GeoPoint[];
 };
 
 const MIN_ROUTE_DISTANCE_METERS = 25;
@@ -80,15 +93,18 @@ const pointSelect = {
 
 @Injectable()
 export class RoutesService {
-  private readonly routeAiModel = process.env.ROUTE_AI_MODEL?.trim();
-  private readonly openAiClient =
-    process.env.OPENAI_API_KEY && this.routeAiModel
-      ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-      : undefined;
-  private readonly openRouteServiceApiKey =
-    process.env.OPENROUTESERVICE_API_KEY?.trim();
-  private readonly openRouteServiceProfile =
-    process.env.OPENROUTESERVICE_PROFILE?.trim() || 'foot-walking';
+  private readonly openAiApiKey = process.env.OPENAI_API_KEY?.trim();
+  private readonly routeAiModel =
+    process.env.ROUTE_AI_MODEL?.trim() ||
+    (this.openAiApiKey ? 'gpt-5-mini' : undefined);
+  private readonly openAiClient = this.openAiApiKey
+    ? new OpenAI({ apiKey: this.openAiApiKey })
+    : undefined;
+  private readonly openStreetMapBaseUrl =
+    process.env.OSRM_BASE_URL?.trim().replace(/\/+$/, '') ||
+    'https://router.project-osrm.org';
+  private readonly openStreetMapProfile =
+    process.env.OSRM_PROFILE?.trim() || 'foot';
   private readonly pointRadiusMeters = this.parsePositiveNumber(
     process.env.ROUTE_POINT_RADIUS_METERS,
     DEFAULT_POINT_RADIUS_METERS,
@@ -106,14 +122,10 @@ export class RoutesService {
   constructor(private readonly prisma: PrismaService) {}
 
   async createPath(userId: number, input: CreatePathInput) {
-    const distanceMeters = this.normalizeRequestedDistance(input.distanceMeters);
-    const pokemon = await this.prisma.pokemon.findFirst({
-      where: {
-        id: input.pokemonId,
-        userId,
-      },
-      select: pokemonSummarySelect,
-    });
+    const distanceMeters = this.normalizeRequestedDistance(
+      input.distanceMeters,
+    );
+    const pokemon = await this.findRoutePokemon(userId, input.pokemonId);
 
     if (!pokemon) {
       throw new NotFoundException('Pokemon not found');
@@ -125,17 +137,22 @@ export class RoutesService {
       pokemon.behavior,
       pokemon.id,
     );
-    const destination = this.buildDestination(
+    const routedPath = await this.tryGenerateRouteWithOpenStreetMap(
       input.point,
       distanceMeters,
       plannedTrip,
     );
-    const generatedPoints = await this.generateRoutePoints(
-      input.point,
-      destination,
-      pokemon.behavior,
-      plannedTrip.scenicCurve,
-    );
+    const destination =
+      routedPath?.destination ??
+      this.buildDestination(input.point, distanceMeters, plannedTrip);
+    const generatedPoints =
+      routedPath?.points ??
+      (await this.generateRoutePoints(
+        input.point,
+        destination,
+        pokemon.behavior,
+        plannedTrip,
+      ));
 
     const points = this.normalizeGeneratedPoints(
       generatedPoints,
@@ -259,8 +276,8 @@ export class RoutesService {
 
     const targetPoint = input.pointId
       ? orderedPoints.find((point) => point.id === input.pointId)
-      : orderedPoints.find((point) => !point.visited) ??
-        orderedPoints[orderedPoints.length - 1];
+      : (orderedPoints.find((point) => !point.visited) ??
+        orderedPoints[orderedPoints.length - 1]);
 
     if (!targetPoint) {
       throw new NotFoundException('Point not found on this route');
@@ -298,7 +315,31 @@ export class RoutesService {
     return route;
   }
 
-  private async getOrderedRoutePoints(routeId: number): Promise<RoutePointRecord[]> {
+  private async findRoutePokemon(userId: number, pokemonId?: number) {
+    if (pokemonId) {
+      return this.prisma.pokemon.findFirst({
+        where: {
+          id: pokemonId,
+          userId,
+        },
+        select: pokemonSummarySelect,
+      });
+    }
+
+    return this.prisma.pokemon.findFirst({
+      where: {
+        userId,
+      },
+      orderBy: {
+        id: 'asc',
+      },
+      select: pokemonSummarySelect,
+    });
+  }
+
+  private async getOrderedRoutePoints(
+    routeId: number,
+  ): Promise<RoutePointRecord[]> {
     const points = await this.prisma.point.findMany({
       where: {
         routeId,
@@ -386,32 +427,80 @@ export class RoutesService {
     }
 
     try {
-      const response = await this.openAiClient.chat.completions.create({
+      const response = await this.openAiClient.responses.create({
         model: this.routeAiModel,
-        messages: [
-          {
-            role: 'system',
-            content:
-              'You design short exploration routes for virtual pets. Respond with a single JSON object only.',
+        instructions:
+          'You design believable walking routes for virtual pets. Return only structured route-planning data that will later be turned into map points.',
+        input: JSON.stringify({
+          behavior,
+          origin,
+          distanceMeters,
+          constraints: {
+            bearingRange: [0, 360],
+            distanceRatioRange: [0.45, 0.92],
+            scenicCurveRange: [-1, 1],
+            waypointLimit: 3,
+            progressRange: [0.12, 0.88],
+            lateralOffsetRatioRange: [-1, 1],
           },
-          {
-            role: 'user',
-            content: JSON.stringify({
-              behavior,
-              origin,
-              distanceMeters,
-              constraints: {
-                bearingRange: [0, 360],
-                distanceRatioRange: [0.35, 0.95],
-                scenicCurveRange: [-1, 1],
+          instruction:
+            'Choose a destination direction and up to three intermediate waypoint hints that create a coherent walking route. Favor routes that feel natural and intentional for the pet behavior.',
+        }),
+        text: {
+          verbosity: 'low',
+          format: {
+            type: 'json_schema',
+            name: 'route_plan',
+            strict: true,
+            schema: {
+              type: 'object',
+              additionalProperties: false,
+              required: [
+                'bearing',
+                'distanceRatio',
+                'scenicCurve',
+                'reason',
+                'waypoints',
+              ],
+              properties: {
+                bearing: {
+                  type: 'number',
+                },
+                distanceRatio: {
+                  type: 'number',
+                },
+                scenicCurve: {
+                  type: 'number',
+                },
+                reason: {
+                  type: 'string',
+                },
+                waypoints: {
+                  type: 'array',
+                  maxItems: 3,
+                  items: {
+                    type: 'object',
+                    additionalProperties: false,
+                    required: ['progress', 'lateralOffsetRatio', 'note'],
+                    properties: {
+                      progress: {
+                        type: 'number',
+                      },
+                      lateralOffsetRatio: {
+                        type: 'number',
+                      },
+                      note: {
+                        type: 'string',
+                      },
+                    },
+                  },
+                },
               },
-              instruction:
-                'Return JSON with keys bearing, distanceRatio, scenicCurve, reason. Do not include place names or extra text.',
-            }),
+            },
           },
-        ],
+        },
       });
-      const content = response.choices[0]?.message?.content;
+      const content = response.output_text;
 
       if (typeof content !== 'string') {
         return null;
@@ -422,6 +511,11 @@ export class RoutesService {
         distanceRatio?: number;
         scenicCurve?: number;
         reason?: string;
+        waypoints?: Array<{
+          progress?: number;
+          lateralOffsetRatio?: number;
+          note?: string;
+        }>;
       };
 
       return {
@@ -429,18 +523,15 @@ export class RoutesService {
         bearing: this.normalizeBearing(parsed.bearing ?? 0),
         distanceRatio: this.clampNumber(
           Number(parsed.distanceRatio ?? 0.75),
-          0.35,
-          0.95,
+          0.45,
+          0.92,
         ),
-        scenicCurve: this.clampNumber(
-          Number(parsed.scenicCurve ?? 0),
-          -1,
-          1,
-        ),
+        scenicCurve: this.clampNumber(Number(parsed.scenicCurve ?? 0), -1, 1),
         reason:
           typeof parsed.reason === 'string' && parsed.reason.trim()
             ? parsed.reason.trim()
             : `${behavior} pokemon chose a route style with AI guidance.`,
+        waypoints: this.normalizeAiWaypoints(parsed.waypoints),
       };
     } catch {
       return null;
@@ -465,6 +556,10 @@ export class RoutesService {
           scenicCurve: this.clampNumber(0.75 * routeBias, -1, 1),
           reason:
             'Water pokemon prefers a smoother curved walk that feels like following a shoreline or riverbank.',
+          waypoints: this.buildHeuristicWaypoints(
+            Behavior.Water,
+            0.75 * routeBias,
+          ),
         };
       case Behavior.Tree:
         return {
@@ -474,6 +569,10 @@ export class RoutesService {
           scenicCurve: this.clampNumber(-0.55 * routeBias, -1, 1),
           reason:
             'Tree pokemon prefers a wandering path that feels closer to parks and greener edges.',
+          waypoints: this.buildHeuristicWaypoints(
+            Behavior.Tree,
+            -0.55 * routeBias,
+          ),
         };
       case Behavior.City:
       default:
@@ -484,6 +583,10 @@ export class RoutesService {
           scenicCurve: this.clampNumber(0.18 * routeBias, -1, 1),
           reason:
             'City pokemon prefers a brisk route that feels more direct and landmark-seeking.',
+          waypoints: this.buildHeuristicWaypoints(
+            Behavior.City,
+            0.18 * routeBias,
+          ),
         };
     }
   }
@@ -519,44 +622,40 @@ export class RoutesService {
     origin: GeoPoint,
     destination: GeoPoint,
     behavior: Behavior,
-    scenicCurve: number,
+    plannedTrip: PlannedTrip,
   ) {
-    const routePoints = await this.tryGenerateRouteWithOpenRouteService(
+    const waypointPoints = this.buildWaypointPoints(
       origin,
       destination,
+      behavior,
+      plannedTrip,
+    );
+    const routePoints = await this.tryGenerateRouteWithWaypointHints(
+      origin,
+      destination,
+      waypointPoints,
     );
 
     if (routePoints) {
       return routePoints;
     }
 
-    return this.buildFallbackRoute(origin, destination, behavior, scenicCurve);
+    return this.buildFallbackRoute(origin, destination, waypointPoints);
   }
 
-  private async tryGenerateRouteWithOpenRouteService(
+  private async tryGenerateRouteWithWaypointHints(
     origin: GeoPoint,
     destination: GeoPoint,
+    waypointPoints: GeoPoint[],
   ): Promise<GeoPoint[] | null> {
-    if (!this.openRouteServiceApiKey) {
-      return null;
-    }
-
     try {
       const response = await fetch(
-        `https://api.openrouteservice.org/v2/directions/${this.openRouteServiceProfile}/geojson`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: this.openRouteServiceApiKey,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            coordinates: [
-              [origin.lng, origin.lat],
-              [destination.lng, destination.lat],
-            ],
-          }),
-        },
+        `${this.openStreetMapBaseUrl}/route/v1/${this.openStreetMapProfile}/${origin.lng},${origin.lat};${[
+          ...waypointPoints,
+          destination,
+        ]
+          .map((point) => `${point.lng},${point.lat}`)
+          .join(';')}?overview=full&geometries=geojson&steps=false`,
       );
 
       if (!response.ok) {
@@ -564,13 +663,13 @@ export class RoutesService {
       }
 
       const payload = (await response.json()) as {
-        features?: Array<{
+        routes?: Array<{
           geometry?: {
             coordinates?: number[][];
           };
         }>;
       };
-      const coordinates = payload.features?.[0]?.geometry?.coordinates;
+      const coordinates = payload.routes?.[0]?.geometry?.coordinates;
 
       if (!coordinates?.length) {
         return null;
@@ -596,74 +695,286 @@ export class RoutesService {
   private buildFallbackRoute(
     origin: GeoPoint,
     destination: GeoPoint,
-    behavior: Behavior,
-    scenicCurve: number,
+    waypointPoints: GeoPoint[],
   ) {
-    const distanceMeters = this.distanceBetweenMeters(origin, destination);
-    const totalPoints = Math.max(
-      4,
-      Math.min(12, Math.round(distanceMeters / 160) + 2),
-    );
-    const bearing = this.initialBearing(origin, destination);
-    const perpendicularBearing = this.normalizeBearing(bearing + 90);
-    const maxCurveMeters = Math.min(distanceMeters * 0.18, 140);
+    const anchors = [origin, ...waypointPoints, destination];
     const path: GeoPoint[] = [origin];
 
-    for (let index = 1; index < totalPoints - 1; index += 1) {
-      const progress = index / (totalPoints - 1);
-      const anchorPoint = this.interpolatePoint(origin, destination, progress);
-      const offsetMeters = this.computeLateralOffset(
-        behavior,
-        scenicCurve,
-        progress,
-        maxCurveMeters,
+    for (let index = 0; index < anchors.length - 1; index += 1) {
+      const start = anchors[index];
+      const end = anchors[index + 1];
+      const segmentDistance = this.distanceBetweenMeters(start, end);
+      const segmentSteps = Math.max(
+        2,
+        Math.min(6, Math.round(segmentDistance / 120) + 1),
       );
 
-      if (Math.abs(offsetMeters) < 2) {
-        path.push(anchorPoint);
-        continue;
+      for (let step = 1; step <= segmentSteps; step += 1) {
+        path.push(this.interpolatePoint(start, end, step / segmentSteps));
       }
+    }
 
-      path.push(
-        this.offsetPoint(
+    return path;
+  }
+
+  private buildWaypointPoints(
+    origin: GeoPoint,
+    destination: GeoPoint,
+    behavior: Behavior,
+    plannedTrip: PlannedTrip,
+  ) {
+    const waypointHints = plannedTrip.waypoints.length
+      ? plannedTrip.waypoints
+      : this.buildHeuristicWaypoints(behavior, plannedTrip.scenicCurve);
+    const baseBearing = this.initialBearing(origin, destination);
+    const perpendicularBearing = this.normalizeBearing(baseBearing + 90);
+    const maxOffsetMeters = Math.max(
+      20,
+      Math.min(this.distanceBetweenMeters(origin, destination) * 0.22, 180),
+    );
+
+    return waypointHints
+      .slice()
+      .sort((left, right) => left.progress - right.progress)
+      .map((waypoint) => {
+        const anchorPoint = this.interpolatePoint(
+          origin,
+          destination,
+          waypoint.progress,
+        );
+        const offsetMeters =
+          this.clampNumber(waypoint.lateralOffsetRatio, -1, 1) *
+          maxOffsetMeters;
+
+        if (Math.abs(offsetMeters) < 2) {
+          return anchorPoint;
+        }
+
+        return this.offsetPoint(
           anchorPoint,
           Math.abs(offsetMeters),
           offsetMeters >= 0
             ? perpendicularBearing
             : this.normalizeBearing(perpendicularBearing + 180),
-        ),
-      );
-    }
-
-    path.push(destination);
-
-    return path;
+        );
+      });
   }
 
-  private computeLateralOffset(
+  private async tryGenerateRouteWithOpenStreetMap(
+    origin: GeoPoint,
+    requestedDistanceMeters: number,
+    plannedTrip: PlannedTrip,
+  ): Promise<RoutedPathPlan | null> {
+    const candidateDestinations = this.buildOpenStreetMapDestinations(
+      origin,
+      requestedDistanceMeters,
+      plannedTrip,
+    );
+
+    try {
+      const routedCandidates = await Promise.all(
+        candidateDestinations.map((destination) =>
+          this.fetchOpenStreetMapRoute(origin, destination),
+        ),
+      );
+      const validCandidates = routedCandidates.filter(
+        (candidate): candidate is RoutedPathPlan => candidate !== null,
+      );
+
+      if (!validCandidates.length) {
+        return null;
+      }
+
+      return validCandidates.sort(
+        (left, right) =>
+          Math.abs(left.distanceMeters - requestedDistanceMeters) -
+          Math.abs(right.distanceMeters - requestedDistanceMeters),
+      )[0];
+    } catch {
+      return null;
+    }
+  }
+
+  private buildOpenStreetMapDestinations(
+    origin: GeoPoint,
+    requestedDistanceMeters: number,
+    plannedTrip: PlannedTrip,
+  ) {
+    const candidateAdjustments = [
+      { bearingOffset: 0, ratioOffset: 0 },
+      { bearingOffset: 35, ratioOffset: 0 },
+      { bearingOffset: -35, ratioOffset: 0 },
+      { bearingOffset: 0, ratioOffset: 0.08 },
+      { bearingOffset: 0, ratioOffset: -0.08 },
+      { bearingOffset: 70, ratioOffset: -0.04 },
+      { bearingOffset: -70, ratioOffset: -0.04 },
+    ];
+
+    return candidateAdjustments.map((adjustment) =>
+      this.offsetPoint(
+        origin,
+        requestedDistanceMeters *
+          this.clampNumber(
+            plannedTrip.distanceRatio + adjustment.ratioOffset,
+            0.4,
+            0.92,
+          ),
+        this.normalizeBearing(plannedTrip.bearing + adjustment.bearingOffset),
+      ),
+    );
+  }
+
+  private async fetchOpenStreetMapRoute(
+    origin: GeoPoint,
+    destination: GeoPoint,
+  ): Promise<RoutedPathPlan | null> {
+    try {
+      const response = await fetch(
+        `${this.openStreetMapBaseUrl}/route/v1/${this.openStreetMapProfile}/${origin.lng},${origin.lat};${destination.lng},${destination.lat}?overview=full&geometries=geojson&steps=false`,
+      );
+
+      if (!response.ok) {
+        return null;
+      }
+
+      const payload = (await response.json()) as {
+        routes?: Array<{
+          distance?: number;
+          geometry?: {
+            coordinates?: number[][];
+          };
+        }>;
+      };
+      const route = payload.routes?.[0];
+      const coordinates = route?.geometry?.coordinates;
+      const routeDistance = Number(route?.distance);
+
+      if (
+        !route ||
+        !Number.isFinite(routeDistance) ||
+        !coordinates ||
+        coordinates.length < 2
+      ) {
+        return null;
+      }
+
+      const points = coordinates
+        .filter(
+          (coordinate): coordinate is [number, number] =>
+            Array.isArray(coordinate) &&
+            coordinate.length >= 2 &&
+            Number.isFinite(coordinate[0]) &&
+            Number.isFinite(coordinate[1]),
+        )
+        .map(([lng, lat]) => ({
+          lat,
+          lng,
+        }));
+
+      if (points.length < 2) {
+        return null;
+      }
+
+      return {
+        destination: points[points.length - 1],
+        distanceMeters: routeDistance,
+        points,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private buildHeuristicWaypoints(
     behavior: Behavior,
     scenicCurve: number,
-    progress: number,
-    maxCurveMeters: number,
-  ) {
-    const curveStrength = Math.max(0.15, Math.abs(scenicCurve));
+  ): PlannedWaypoint[] {
+    const curveStrength = this.clampNumber(Math.abs(scenicCurve), 0.15, 1);
+    const curveDirection = scenicCurve >= 0 ? 1 : -1;
 
     switch (behavior) {
       case Behavior.Water:
-        return Math.sin(progress * Math.PI) * maxCurveMeters * curveStrength;
+        return [
+          {
+            progress: 0.28,
+            lateralOffsetRatio: 0.45 * curveStrength * curveDirection,
+            note: 'ease into a curved outward drift',
+          },
+          {
+            progress: 0.64,
+            lateralOffsetRatio: 0.72 * curveStrength * curveDirection,
+            note: 'keep the route flowing in the same direction',
+          },
+        ];
       case Behavior.Tree:
-        return (
-          Math.sin(progress * Math.PI * 3) *
-          maxCurveMeters *
-          0.75 *
-          curveStrength
-        );
+        return [
+          {
+            progress: 0.2,
+            lateralOffsetRatio: -0.42 * curveStrength * curveDirection,
+            note: 'start with a meandering detour',
+          },
+          {
+            progress: 0.47,
+            lateralOffsetRatio: 0.24 * curveStrength * curveDirection,
+            note: 'cross back through a calmer midpoint',
+          },
+          {
+            progress: 0.76,
+            lateralOffsetRatio: -0.5 * curveStrength * curveDirection,
+            note: 'finish with another soft wander',
+          },
+        ];
       case Behavior.City:
       default:
-        return (
-          (progress < 0.5 ? 1 : -1) * maxCurveMeters * 0.3 * curveStrength
-        );
+        return [
+          {
+            progress: 0.36,
+            lateralOffsetRatio: 0.16 * curveStrength * curveDirection,
+            note: 'small outward jog toward a nearby landmark',
+          },
+          {
+            progress: 0.7,
+            lateralOffsetRatio: -0.14 * curveStrength * curveDirection,
+            note: 'tight correction back toward the destination',
+          },
+        ];
     }
+  }
+
+  private normalizeAiWaypoints(
+    waypoints:
+      | Array<{
+          progress?: number;
+          lateralOffsetRatio?: number;
+          note?: string;
+        }>
+      | undefined,
+  ): PlannedWaypoint[] {
+    if (!Array.isArray(waypoints)) {
+      return [];
+    }
+
+    return waypoints
+      .filter(
+        (waypoint) =>
+          waypoint &&
+          Number.isFinite(waypoint.progress) &&
+          Number.isFinite(waypoint.lateralOffsetRatio),
+      )
+      .map((waypoint) => ({
+        progress: this.clampNumber(Number(waypoint.progress), 0.12, 0.88),
+        lateralOffsetRatio: this.clampNumber(
+          Number(waypoint.lateralOffsetRatio),
+          -1,
+          1,
+        ),
+        note:
+          typeof waypoint.note === 'string' && waypoint.note.trim()
+            ? waypoint.note.trim()
+            : 'ai waypoint',
+      }))
+      .sort((left, right) => left.progress - right.progress)
+      .slice(0, 3);
   }
 
   private normalizeGeneratedPoints(
@@ -671,11 +982,7 @@ export class RoutesService {
     origin: GeoPoint,
     destination: GeoPoint,
   ) {
-    const sanitizedPoints = [
-      origin,
-      ...points,
-      destination,
-    ].filter(
+    const sanitizedPoints = [origin, ...points, destination].filter(
       (point) =>
         Number.isFinite(point.lat) &&
         Number.isFinite(point.lng) &&
@@ -683,16 +990,16 @@ export class RoutesService {
         Math.abs(point.lng) <= 180,
     );
 
-    const sampledPoints = this.samplePoints(sanitizedPoints, this.maxPersistedPoints);
+    const sampledPoints = this.samplePoints(
+      sanitizedPoints,
+      this.maxPersistedPoints,
+    );
     const deduplicatedPoints: GeoPoint[] = [];
 
     for (const point of sampledPoints) {
       const lastPoint = deduplicatedPoints.at(-1);
 
-      if (
-        !lastPoint ||
-        this.distanceBetweenMeters(lastPoint, point) > 3
-      ) {
+      if (!lastPoint || this.distanceBetweenMeters(lastPoint, point) > 3) {
         deduplicatedPoints.push(point);
       }
     }
@@ -728,7 +1035,11 @@ export class RoutesService {
     return sampledPoints;
   }
 
-  private interpolatePoint(origin: GeoPoint, destination: GeoPoint, progress: number) {
+  private interpolatePoint(
+    origin: GeoPoint,
+    destination: GeoPoint,
+    progress: number,
+  ) {
     return {
       lat: origin.lat + (destination.lat - origin.lat) * progress,
       lng: origin.lng + (destination.lng - origin.lng) * progress,
@@ -742,9 +1053,7 @@ export class RoutesService {
     const endLat = this.toRadians(end.lat);
     const haversine =
       Math.sin(latDistance / 2) ** 2 +
-      Math.cos(startLat) *
-        Math.cos(endLat) *
-        Math.sin(lngDistance / 2) ** 2;
+      Math.cos(startLat) * Math.cos(endLat) * Math.sin(lngDistance / 2) ** 2;
 
     return 2 * EARTH_RADIUS_METERS * Math.asin(Math.sqrt(haversine));
   }
@@ -761,7 +1070,11 @@ export class RoutesService {
     return this.normalizeBearing((Math.atan2(y, x) * 180) / Math.PI);
   }
 
-  private offsetPoint(origin: GeoPoint, distanceMeters: number, bearingDegrees: number) {
+  private offsetPoint(
+    origin: GeoPoint,
+    distanceMeters: number,
+    bearingDegrees: number,
+  ) {
     const angularDistance = distanceMeters / EARTH_RADIUS_METERS;
     const bearingRadians = this.toRadians(bearingDegrees);
     const startLat = this.toRadians(origin.lat);
@@ -778,13 +1091,12 @@ export class RoutesService {
         Math.sin(bearingRadians) *
           Math.sin(angularDistance) *
           Math.cos(startLat),
-        Math.cos(angularDistance) -
-          Math.sin(startLat) * Math.sin(targetLat),
+        Math.cos(angularDistance) - Math.sin(startLat) * Math.sin(targetLat),
       );
 
     return {
       lat: (targetLat * 180) / Math.PI,
-      lng: ((targetLng * 180) / Math.PI + 540) % 360 - 180,
+      lng: (((targetLng * 180) / Math.PI + 540) % 360) - 180,
     };
   }
 

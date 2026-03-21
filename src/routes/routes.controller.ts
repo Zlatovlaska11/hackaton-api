@@ -32,13 +32,14 @@ export class RoutesController {
     @Query('point') pointQuery?: string,
     @Query('distance') distanceQuery?: string,
     @Query('pokemonId') pokemonIdQuery?: string,
+    @Query('id_pokemona') pokemonIdLegacyQuery?: string,
   ) {
     return this.routesService.createPath(req.user.userId, {
       point: this.parsePoint(pointHeader ?? pointQuery),
       distanceMeters: this.parseDistanceMeters(distanceHeader ?? distanceQuery),
-      pokemonId: this.parseInteger(
-        pokemonIdHeader ?? pokemonIdQuery,
-        'A valid pokemon id is required',
+      pokemonId: this.parseOptionalInteger(
+        pokemonIdHeader ?? pokemonIdQuery ?? pokemonIdLegacyQuery,
+        'pokemonId must be a positive integer',
       ),
     });
   }
@@ -179,5 +180,13 @@ export class RoutesController {
     }
 
     return parsedValue;
+  }
+
+  private parseOptionalInteger(value: string | undefined, message: string) {
+    if (value === undefined || value === null || value.trim() === '') {
+      return undefined;
+    }
+
+    return this.parseInteger(value, message);
   }
 }
