@@ -60,6 +60,7 @@ describe('AuthController', () => {
       username: 'john',
       petType: 'city',
       petName: 'Rex',
+      xp: 12,
       pokemon: [
         {
           id: 3,
@@ -81,6 +82,7 @@ describe('AuthController', () => {
       username: 'john',
       petType: 'city',
       petName: 'Rex',
+      xp: 12,
       pokemon: [
         {
           id: 3,
@@ -97,6 +99,7 @@ describe('AuthController', () => {
       username: 'maria',
       petType: 'water',
       petName: 'Pearl',
+      xp: 27,
       pokemon: [
         {
           id: 4,
@@ -118,6 +121,7 @@ describe('AuthController', () => {
       username: 'maria',
       petType: 'water',
       petName: 'Pearl',
+      xp: 27,
       pokemon: [
         {
           id: 4,

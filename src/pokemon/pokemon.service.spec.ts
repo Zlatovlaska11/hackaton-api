@@ -87,6 +87,7 @@ describe('PokemonService', () => {
       userId: 1,
       name: 'Sprout',
       behavior: 'Tree',
+      xp: 0,
       stats: {
         agility: 2,
         intelligence: 3,
@@ -348,6 +349,7 @@ describe('PokemonService', () => {
           userId: 1,
           name: 'Sprearl',
           behavior: 'Water',
+          xp: 0,
           stats: {
             agility: 9,
             intelligence: 10,
@@ -359,6 +361,7 @@ describe('PokemonService', () => {
           userId: 2,
           name: 'Pearout',
           behavior: 'Tree',
+          xp: 0,
           stats: {
             agility: 9,
             intelligence: 10,

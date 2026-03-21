@@ -98,6 +98,7 @@ describe('UsersService', () => {
         id: true,
         name: true,
         behavior: true,
+        xp: true,
         stats: {
           select: {
             agility: true,
@@ -128,6 +129,7 @@ describe('UsersService', () => {
       username: 'alice',
       petType: 'tree',
       petName: 'Luna',
+      xp: 14,
       lastKnownLat: 50.087,
       lastKnownLng: 14.421,
       lastSeenAt,
@@ -135,6 +137,7 @@ describe('UsersService', () => {
         id: 11,
         name: 'Luna',
         behavior: 'Tree',
+        xp: 9,
         stats: {
           agility: 4,
           intelligence: 7,
@@ -152,6 +155,7 @@ describe('UsersService', () => {
         username: true,
         petType: true,
         petName: true,
+        xp: true,
         lastKnownLat: true,
         lastKnownLng: true,
         lastSeenAt: true,
@@ -160,6 +164,7 @@ describe('UsersService', () => {
             id: true,
             name: true,
             behavior: true,
+            xp: true,
             stats: {
               select: {
                 agility: true,
@@ -176,6 +181,7 @@ describe('UsersService', () => {
       username: 'alice',
       petType: 'tree',
       petName: 'Luna',
+      xp: 14,
       lastKnownLocation: {
         lat: 50.087,
         lng: 14.421,
@@ -187,6 +193,7 @@ describe('UsersService', () => {
           id: 11,
           name: 'Luna',
           behavior: 'Tree',
+          xp: 9,
           stats: {
             agility: 4,
             intelligence: 7,
@@ -388,6 +395,7 @@ describe('UsersService', () => {
         id: true,
         name: true,
         behavior: true,
+        xp: true,
         stats: {
           select: {
             agility: true,
@@ -402,6 +410,7 @@ describe('UsersService', () => {
       username: 'maria',
       petType: 'water',
       petName: 'Pearl',
+      xp: 0,
       lastKnownLocation: null,
       lastSeenAt: null,
       isOnline: false,
@@ -410,6 +419,7 @@ describe('UsersService', () => {
           id: 21,
           name: 'Pearl',
           behavior: 'Water',
+          xp: 0,
           stats: {
             agility: 0,
             intelligence: 0,

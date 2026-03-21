@@ -31,6 +31,7 @@ model Users {
   password               String
   petType                String?
   petName                String?
+  xp                     Int             @default(0)
   lastKnownLat           Float?          @map("last_known_lat")
   lastKnownLng           Float?          @map("last_known_lng")
   lastSeenAt             DateTime?       @map("last_seen_at")
@@ -80,6 +81,7 @@ model Pokemon {
   userId       Int                 @unique @map("user_id")
   name         String
   behavior     Behavior
+  xp           Int                 @default(0)
   user         Users               @relation(fields: [userId], references: [userId], onDelete: Cascade)
   routes       Route[]
   stats        PokemonStats?

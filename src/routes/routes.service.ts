@@ -59,6 +59,10 @@ const MIN_ROUTE_DISTANCE_METERS = 25;
 const MAX_ROUTE_DISTANCE_METERS = 50000;
 const DEFAULT_POINT_RADIUS_METERS = 30;
 const DEFAULT_MAX_POINTS = 25;
+const DEFAULT_USER_CHECKPOINT_XP = 10;
+const DEFAULT_PET_CHECKPOINT_XP = 10;
+const DEFAULT_ROUTE_WRITE_TRANSACTION_MAX_WAIT_MS = 10000;
+const DEFAULT_ROUTE_WRITE_TRANSACTION_TIMEOUT_MS = 20000;
 const EARTH_RADIUS_METERS = 6371000;
 
 const pokemonSummarySelect = {
@@ -110,6 +114,23 @@ export class RoutesService {
     process.env.ROUTE_POINT_RADIUS_METERS,
     DEFAULT_POINT_RADIUS_METERS,
   );
+  private readonly userCheckpointXp = this.parseNonNegativeInteger(
+    process.env.ROUTE_CHECKPOINT_USER_XP,
+    DEFAULT_USER_CHECKPOINT_XP,
+  );
+  private readonly petCheckpointXp = this.parseNonNegativeInteger(
+    process.env.ROUTE_CHECKPOINT_PET_XP,
+    DEFAULT_PET_CHECKPOINT_XP,
+  );
+  private readonly routeWriteTransactionMaxWaitMs = this.parseNonNegativeInteger(
+    process.env.ROUTE_WRITE_TRANSACTION_MAX_WAIT_MS,
+    DEFAULT_ROUTE_WRITE_TRANSACTION_MAX_WAIT_MS,
+  );
+  private readonly routeWriteTransactionTimeoutMs =
+    this.parseNonNegativeInteger(
+      process.env.ROUTE_WRITE_TRANSACTION_TIMEOUT_MS,
+      DEFAULT_ROUTE_WRITE_TRANSACTION_TIMEOUT_MS,
+    );
   private readonly maxPersistedPoints = Math.max(
     2,
     Math.round(
@@ -165,55 +186,52 @@ export class RoutesService {
       destination,
     );
 
-    const createdRoute = await this.prisma.$transaction(async (tx) => {
-      const route = await tx.route.create({
-        data: {
-          userId,
-          pokemonId: pokemon.id,
-        },
-        select: routeSelect,
-      });
-
-      const createdPoints: RoutePointRecord[] = [];
-      let previousPointId: number | null = null;
-
-      for (const point of points) {
-        const createdPoint = await tx.point.create({
+    const createdRoute = await this.prisma.$transaction(
+      async (tx) => {
+        const route = await tx.route.create({
           data: {
-            lat: point.lat,
-            lng: point.lng,
-            routeId: route.id,
-            previousPointId,
+            userId,
+            pokemonId: pokemon.id,
           },
-          select: pointSelect,
+          select: routeSelect,
         });
 
-        if (previousPointId !== null) {
-          await tx.point.update({
-            where: {
-              id: previousPointId,
-            },
+        const createdPoints: RoutePointRecord[] = [];
+        let previousPointId: number | null = null;
+
+        for (const point of points) {
+          const createdPoint = await tx.point.create({
             data: {
-              nextPointId: createdPoint.id,
+              lat: point.lat,
+              lng: point.lng,
+              routeId: route.id,
+              previousPointId,
             },
+            select: pointSelect,
           });
 
-          const previousPoint = createdPoints.at(-1);
+          if (previousPointId !== null) {
+            const previousPoint = createdPoints.at(-1);
 
-          if (previousPoint) {
-            previousPoint.nextPointId = createdPoint.id;
+            if (previousPoint) {
+              previousPoint.nextPointId = createdPoint.id;
+            }
           }
+
+          createdPoints.push(createdPoint);
+          previousPointId = createdPoint.id;
         }
 
-        createdPoints.push(createdPoint);
-        previousPointId = createdPoint.id;
-      }
-
-      return {
-        route,
-        points: createdPoints,
-      };
-    });
+        return {
+          route,
+          points: createdPoints,
+        };
+      },
+      {
+        maxWait: this.routeWriteTransactionMaxWaitMs,
+        timeout: this.routeWriteTransactionTimeoutMs,
+      },
+    );
 
     return {
       route: createdRoute.route,
@@ -290,13 +308,25 @@ export class RoutesService {
     }
 
     const distanceMeters = this.distanceBetweenMeters(input.point, targetPoint);
+    const isOnPoint = distanceMeters <= this.pointRadiusMeters;
+    const reward =
+      isOnPoint && !targetPoint.visited
+        ? await this.completeCheckpoint(userId, route, targetPoint, orderedPoints)
+        : null;
 
     return {
       routeId: route.id,
       pointId: targetPoint.id,
-      isOnPoint: distanceMeters <= this.pointRadiusMeters,
+      isOnPoint,
       distanceMeters: Math.round(distanceMeters * 100) / 100,
       radiusMeters: this.pointRadiusMeters,
+      checkpointCompleted: reward !== null,
+      pointVisited: targetPoint.visited || reward !== null,
+      donePercent: reward?.donePercent ?? route.donePercent,
+      rewards: {
+        userXpGained: reward?.userXpGained ?? 0,
+        petXpGained: reward?.petXpGained ?? 0,
+      },
       checkedPoint: input.point,
       targetPoint: {
         lat: targetPoint.lat,
@@ -319,6 +349,62 @@ export class RoutesService {
     }
 
     return route;
+  }
+
+  private async completeCheckpoint(
+    userId: number,
+    route: Awaited<ReturnType<RoutesService['getOwnedRouteOrThrow']>>,
+    targetPoint: RoutePointRecord,
+    orderedPoints: RoutePointRecord[],
+  ) {
+    const visitedPoints = orderedPoints.filter((point) => point.visited).length + 1;
+    const donePercent =
+      Math.round((visitedPoints / orderedPoints.length) * 10000) / 100;
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.point.update({
+        where: {
+          id: targetPoint.id,
+        },
+        data: {
+          visited: true,
+        },
+      });
+      await tx.route.update({
+        where: {
+          id: route.id,
+        },
+        data: {
+          donePercent,
+        },
+      });
+      await tx.users.update({
+        where: {
+          userId,
+        },
+        data: {
+          xp: {
+            increment: this.userCheckpointXp,
+          },
+        },
+      });
+      await tx.pokemon.update({
+        where: {
+          id: route.pokemonId,
+        },
+        data: {
+          xp: {
+            increment: this.petCheckpointXp,
+          },
+        },
+      });
+    });
+
+    return {
+      donePercent,
+      userXpGained: this.userCheckpointXp,
+      petXpGained: this.petCheckpointXp,
+    };
   }
 
   private async findRoutePokemon(userId: number, pokemonId?: number) {
@@ -358,6 +444,14 @@ export class RoutesService {
     }
 
     const pointsById = new Map(points.map((point) => [point.id, point]));
+    const pointsByPreviousPointId = new Map(
+      points
+        .filter(
+          (point): point is RoutePointRecord & { previousPointId: number } =>
+            point.previousPointId !== null,
+        )
+        .map((point) => [point.previousPointId, point]),
+    );
     const orderedPoints: RoutePointRecord[] = [];
     const visited = new Set<number>();
     let currentPoint: RoutePointRecord | undefined =
@@ -369,7 +463,7 @@ export class RoutesService {
       visited.add(currentPoint.id);
       currentPoint = currentPoint.nextPointId
         ? pointsById.get(currentPoint.nextPointId)
-        : undefined;
+        : pointsByPreviousPointId.get(currentPoint.id);
     }
 
     if (orderedPoints.length === points.length) {
@@ -1130,6 +1224,16 @@ export class RoutesService {
     const parsedValue = Number(value);
 
     if (!Number.isFinite(parsedValue) || parsedValue <= 0) {
+      return fallback;
+    }
+
+    return parsedValue;
+  }
+
+  private parseNonNegativeInteger(value: string | undefined, fallback: number) {
+    const parsedValue = Number(value);
+
+    if (!Number.isInteger(parsedValue) || parsedValue < 0) {
       return fallback;
     }
 

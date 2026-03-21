@@ -27,6 +27,7 @@ const pokemonSummarySelect = {
   id: true,
   name: true,
   behavior: true,
+  xp: true,
   stats: {
     select: pokemonStatsSelect,
   },
@@ -36,6 +37,7 @@ const userInfoSelect = {
   ...userSummarySelect,
   petType: true,
   petName: true,
+  xp: true,
   lastKnownLat: true,
   lastKnownLng: true,
   lastSeenAt: true,
@@ -87,12 +89,14 @@ export type PokemonSummary = {
   id: number;
   name: string;
   behavior: Behavior;
+  xp: number;
   stats: PokemonStatsSummary | null;
 };
 
 export type UserInfo = UserSummary & {
   petType: string | null;
   petName: string | null;
+  xp: number;
   lastKnownLocation: GpsPoint | null;
   lastSeenAt: Date | null;
   isOnline: boolean;
@@ -634,6 +638,7 @@ export class UsersService {
       username: user.username,
       petType: user.petType,
       petName: user.petName,
+      xp: typeof user.xp === 'number' ? user.xp : 0,
       lastKnownLocation: this.getLocation(user),
       lastSeenAt: user.lastSeenAt,
       isOnline: this.isOnline(user.lastSeenAt),
@@ -646,6 +651,7 @@ export class UsersService {
       id: pokemon.id,
       name: pokemon.name,
       behavior: pokemon.behavior,
+      xp: typeof pokemon.xp === 'number' ? pokemon.xp : 0,
       stats: pokemon.stats
         ? {
             agility: pokemon.stats.agility,

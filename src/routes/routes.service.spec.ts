@@ -128,7 +128,6 @@ describe('RoutesService', () => {
             nextPointId: null,
             routeId: 11,
           }),
-        update: jest.fn().mockResolvedValue(undefined),
       },
     };
 
@@ -182,16 +181,14 @@ describe('RoutesService', () => {
       },
       select: expect.any(Object),
     });
-    expect(tx.point.update).toHaveBeenCalledWith({
-      where: {
-        id: 21,
-      },
-      data: {
-        nextPointId: 22,
-      },
-    });
     expect(result.route.id).toBe(11);
     expect(result.points.map((point) => point.id)).toEqual([21, 22, 23, 24]);
+    expect(result.points.map((point) => point.nextPointId)).toEqual([
+      22,
+      23,
+      24,
+      null,
+    ]);
     expect(result.planner).toEqual({
       source: 'heuristic',
       reason: 'test plan',
@@ -254,7 +251,6 @@ describe('RoutesService', () => {
             nextPointId: null,
             routeId: 14,
           }),
-        update: jest.fn().mockResolvedValue(undefined),
       },
     };
 
@@ -430,6 +426,58 @@ describe('RoutesService', () => {
     expect(result.points.map((point) => point.id)).toEqual([31, 32, 33]);
   });
 
+  it('reconstructs route order from previousPointId when nextPointId is missing', async () => {
+    prismaService.route.findFirst.mockResolvedValue({
+      id: 12,
+      userId: 1,
+      pokemonId: 7,
+      ended: false,
+      inProgress: false,
+      donePercent: 0,
+      createdAt: new Date('2026-03-21T10:00:00.000Z'),
+      startedAt: null,
+      endedAt: null,
+      pokemon: {
+        id: 7,
+        name: 'Pearl',
+        behavior: 'Water',
+      },
+    });
+    prismaService.point.findMany.mockResolvedValue([
+      {
+        id: 43,
+        lat: 50.0873,
+        lng: 14.423,
+        visited: false,
+        previousPointId: 42,
+        nextPointId: null,
+        routeId: 12,
+      },
+      {
+        id: 41,
+        lat: 50.087,
+        lng: 14.421,
+        visited: false,
+        previousPointId: null,
+        nextPointId: null,
+        routeId: 12,
+      },
+      {
+        id: 42,
+        lat: 50.0872,
+        lng: 14.422,
+        visited: false,
+        previousPointId: 41,
+        nextPointId: null,
+        routeId: 12,
+      },
+    ]);
+
+    const result = await service.getPoints(1, 12);
+
+    expect(result.points.map((point) => point.id)).toEqual([41, 42, 43]);
+  });
+
   it('starts a route by marking it in progress', async () => {
     prismaService.route.findFirst.mockResolvedValue({
       id: 11,
@@ -518,6 +566,24 @@ describe('RoutesService', () => {
         routeId: 11,
       },
     ]);
+    const tx = {
+      point: {
+        update: jest.fn().mockResolvedValue(undefined),
+      },
+      route: {
+        update: jest.fn().mockResolvedValue(undefined),
+      },
+      users: {
+        update: jest.fn().mockResolvedValue(undefined),
+      },
+      pokemon: {
+        update: jest.fn().mockResolvedValue(undefined),
+      },
+    };
+
+    prismaService.$transaction.mockImplementation(async (callback) =>
+      callback(tx),
+    );
 
     const result = await service.isOnPoint(1, 11, {
       point: { lat: 50.08704, lng: 14.42103 },
@@ -527,8 +593,50 @@ describe('RoutesService', () => {
       lat: 50.08704,
       lng: 14.42103,
     });
+    expect(tx.point.update).toHaveBeenCalledWith({
+      where: {
+        id: 42,
+      },
+      data: {
+        visited: true,
+      },
+    });
+    expect(tx.route.update).toHaveBeenCalledWith({
+      where: {
+        id: 11,
+      },
+      data: {
+        donePercent: 100,
+      },
+    });
+    expect(tx.users.update).toHaveBeenCalledWith({
+      where: {
+        userId: 1,
+      },
+      data: {
+        xp: {
+          increment: 10,
+        },
+      },
+    });
+    expect(tx.pokemon.update).toHaveBeenCalledWith({
+      where: {
+        id: 7,
+      },
+      data: {
+        xp: {
+          increment: 10,
+        },
+      },
+    });
     expect(result.isOnPoint).toBe(true);
     expect(result.pointId).toBe(42);
     expect(result.radiusMeters).toBe(30);
+    expect(result.checkpointCompleted).toBe(true);
+    expect(result.donePercent).toBe(100);
+    expect(result.rewards).toEqual({
+      userXpGained: 10,
+      petXpGained: 10,
+    });
   });
 });

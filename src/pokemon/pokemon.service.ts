@@ -18,6 +18,7 @@ const pokemonDetailSelect = {
   userId: true,
   name: true,
   behavior: true,
+  xp: true,
   stats: {
     select: pokemonStatsSelect,
   },
@@ -49,6 +50,7 @@ export type PokemonDetailResponse = {
   userId: number;
   name: string;
   behavior: Behavior;
+  xp: number;
   stats: PokemonStatsValue;
 };
 
@@ -462,6 +464,7 @@ export class PokemonService {
       userId: pokemon.userId,
       name: pokemon.name,
       behavior: pokemon.behavior,
+      xp: typeof pokemon.xp === 'number' ? pokemon.xp : 0,
       stats: this.getStats(pokemon),
     };
   }
