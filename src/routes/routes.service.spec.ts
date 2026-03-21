@@ -21,10 +21,13 @@ describe('RoutesService', () => {
   };
   const usersService = {
     recordUserLocation: jest.fn(),
+    canUseExternalAi: jest.fn(),
   };
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    process.env.OSRM_BASE_URL = 'https://router.test';
+    usersService.canUseExternalAi.mockResolvedValue(false);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [

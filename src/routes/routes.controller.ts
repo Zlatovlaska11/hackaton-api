@@ -1,17 +1,18 @@
 import {
   BadRequestException,
+  Body,
   Controller,
   Get,
-  Headers,
   Param,
   ParseIntPipe,
   Post,
-  Query,
   Request,
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RoutesService } from './routes.service';
+import { RateLimit } from '../security/rate-limit.decorator';
+import { RateLimitGuard } from '../security/rate-limit.guard';
 
 type GeoPoint = {
   lat: number;
@@ -23,22 +24,15 @@ type GeoPoint = {
 export class RoutesController {
   constructor(private readonly routesService: RoutesService) {}
 
-  @Get('create-path')
-  async createPath(
-    @Request() req,
-    @Headers('point') pointHeader?: string,
-    @Headers('distance') distanceHeader?: string,
-    @Headers('id_pokemona') pokemonIdHeader?: string,
-    @Query('point') pointQuery?: string,
-    @Query('distance') distanceQuery?: string,
-    @Query('pokemonId') pokemonIdQuery?: string,
-    @Query('id_pokemona') pokemonIdLegacyQuery?: string,
-  ) {
+  @UseGuards(RateLimitGuard)
+  @RateLimit({ key: 'user', limit: 30, windowMs: 5 * 60 * 1000 })
+  @Post('create-path')
+  async createPath(@Request() req, @Body() body: Record<string, unknown>) {
     return this.routesService.createPath(req.user.userId, {
-      point: this.parsePoint(pointHeader ?? pointQuery),
-      distanceMeters: this.parseDistanceMeters(distanceHeader ?? distanceQuery),
+      point: this.parsePoint(body.point),
+      distanceMeters: this.parseDistanceMeters(body.distance),
       pokemonId: this.parseOptionalInteger(
-        pokemonIdHeader ?? pokemonIdQuery ?? pokemonIdLegacyQuery,
+        body.pokemonId ?? body.id_pokemona,
         'pokemonId must be a positive integer',
       ),
     });
@@ -60,20 +54,20 @@ export class RoutesController {
     return this.routesService.startPath(req.user.userId, routeId);
   }
 
-  @Get(':routeId/is-on-point')
+  @UseGuards(RateLimitGuard)
+  @RateLimit({ key: 'user', limit: 120, windowMs: 5 * 60 * 1000 })
+  @Post(':routeId/is-on-point')
   async isOnPoint(
     @Request() req,
     @Param('routeId', ParseIntPipe) routeId: number,
-    @Headers('point') pointHeader?: string,
-    @Query('point') pointQuery?: string,
-    @Query('pointId') pointIdQuery?: string,
+    @Body() body: Record<string, unknown>,
   ) {
-    const pointId = pointIdQuery
-      ? this.parseInteger(pointIdQuery, 'pointId must be a positive integer')
+    const pointId = body.pointId
+      ? this.parseInteger(body.pointId, 'pointId must be a positive integer')
       : undefined;
 
     return this.routesService.isOnPoint(req.user.userId, routeId, {
-      point: this.parsePoint(pointHeader ?? pointQuery),
+      point: this.parsePoint(body.point),
       pointId,
     });
   }
@@ -86,54 +80,56 @@ export class RoutesController {
     return this.routesService.stopPath(req.user.userId, routeId);
   }
 
-  private parsePoint(value?: string): GeoPoint {
-    if (!value) {
+  private parsePoint(value: unknown): GeoPoint {
+    if (value === undefined || value === null) {
       throw new BadRequestException(
-        'point is required. Use "lat,lng" or JSON {"lat": ..., "lng": ...}',
+        'point is required. Use "lat,lng", [lat, lng], or {"lat": ..., "lng": ...}',
       );
     }
 
-    const trimmedValue = value.trim();
+    if (Array.isArray(value) && value.length >= 2) {
+      return this.validatePoint({
+        lat: Number(value[0]),
+        lng: Number(value[1]),
+      });
+    }
 
-    try {
-      const parsed = JSON.parse(trimmedValue) as
-        | [number, number]
-        | {
-            lat?: number;
-            lng?: number;
-            latitude?: number;
-            longitude?: number;
-          };
+    if (value && typeof value === 'object') {
+      const point = value as {
+        lat?: number;
+        lng?: number;
+        latitude?: number;
+        longitude?: number;
+      };
 
-      if (Array.isArray(parsed) && parsed.length >= 2) {
-        return this.validatePoint({
-          lat: Number(parsed[0]),
-          lng: Number(parsed[1]),
-        });
-      }
+      return this.validatePoint({
+        lat: Number(point.lat ?? point.latitude),
+        lng: Number(point.lng ?? point.longitude),
+      });
+    }
 
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        return this.validatePoint({
-          lat: Number(parsed.lat ?? parsed.latitude),
-          lng: Number(parsed.lng ?? parsed.longitude),
-        });
-      }
-    } catch {
-      const pieces = trimmedValue
-        .split(/[,\s;]+/)
-        .map((piece) => piece.trim())
-        .filter(Boolean);
+    if (typeof value === 'string') {
+      const trimmedValue = value.trim();
 
-      if (pieces.length >= 2) {
-        return this.validatePoint({
-          lat: Number(pieces[0]),
-          lng: Number(pieces[1]),
-        });
+      try {
+        return this.parsePoint(JSON.parse(trimmedValue));
+      } catch {
+        const pieces = trimmedValue
+          .split(/[,\s;]+/)
+          .map((piece) => piece.trim())
+          .filter(Boolean);
+
+        if (pieces.length >= 2) {
+          return this.validatePoint({
+            lat: Number(pieces[0]),
+            lng: Number(pieces[1]),
+          });
+        }
       }
     }
 
     throw new BadRequestException(
-      'point must be "lat,lng" or JSON {"lat": ..., "lng": ...}',
+      'point must be "lat,lng", [lat, lng], or {"lat": ..., "lng": ...}',
     );
   }
 
@@ -149,12 +145,13 @@ export class RoutesController {
     return point;
   }
 
-  private parseDistanceMeters(value?: string): number {
-    if (!value) {
+  private parseDistanceMeters(value: unknown): number {
+    if (value === undefined || value === null) {
       throw new BadRequestException('distance is required');
     }
 
-    const normalizedValue = value.trim().toLowerCase();
+    const normalizedValue =
+      typeof value === 'number' ? String(value) : String(value).trim().toLowerCase();
     const matchedValue = normalizedValue.match(/^(-?\d+(?:\.\d+)?)\s*(km|m)?$/);
 
     if (!matchedValue) {
@@ -172,7 +169,7 @@ export class RoutesController {
     return matchedValue[2] === 'km' ? numericValue * 1000 : numericValue;
   }
 
-  private parseInteger(value: string | undefined, message: string) {
+  private parseInteger(value: unknown, message: string) {
     const parsedValue = Number(value);
 
     if (!Number.isInteger(parsedValue) || parsedValue <= 0) {
@@ -182,8 +179,8 @@ export class RoutesController {
     return parsedValue;
   }
 
-  private parseOptionalInteger(value: string | undefined, message: string) {
-    if (value === undefined || value === null || value.trim() === '') {
+  private parseOptionalInteger(value: unknown, message: string) {
+    if (value === undefined || value === null || String(value).trim() === '') {
       return undefined;
     }
 

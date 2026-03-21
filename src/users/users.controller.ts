@@ -3,9 +3,11 @@ import {
   Body,
   Controller,
   DefaultValuePipe,
+  Delete,
   Get,
   NotFoundException,
   Param,
+  Patch,
   ParseIntPipe,
   Post,
   Query,
@@ -87,9 +89,37 @@ export class UsersController {
     });
   }
 
+  @Get('privacy')
+  async getPrivacy(@Request() req) {
+    return this.usersService.getPrivacySettings(req.user.userId);
+  }
+
+  @Patch('privacy')
+  async updatePrivacy(@Request() req, @Body() body: Record<string, unknown>) {
+    return this.usersService.updatePrivacySettings(req.user.userId, {
+      shareLocationWithFriends: this.toOptionalBoolean(
+        body.shareLocationWithFriends,
+      ),
+      shareLocationPublicly: this.toOptionalBoolean(body.shareLocationPublicly),
+      allowExternalAiProcessing: this.toOptionalBoolean(
+        body.allowExternalAiProcessing,
+      ),
+    });
+  }
+
+  @Get('me/export')
+  async exportMe(@Request() req) {
+    return this.usersService.exportUserData(req.user.userId);
+  }
+
+  @Delete('me')
+  async deleteMe(@Request() req) {
+    return this.usersService.deleteAccount(req.user.userId);
+  }
+
   @Get(':userId')
   async getUser(@Param('userId', ParseIntPipe) userId: number) {
-    const user = await this.usersService.findUserInfoById(userId);
+    const user = await this.usersService.findPublicUserProfileById(userId);
 
     if (!user) {
       throw new NotFoundException('User not found');
@@ -117,5 +147,9 @@ export class UsersController {
 
   private toOptionalString(value: unknown) {
     return typeof value === 'string' ? value : undefined;
+  }
+
+  private toOptionalBoolean(value: unknown) {
+    return typeof value === 'boolean' ? value : undefined;
   }
 }

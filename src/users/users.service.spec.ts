@@ -133,6 +133,9 @@ describe('UsersService', () => {
       lastKnownLat: 50.087,
       lastKnownLng: 14.421,
       lastSeenAt,
+      shareLocationWithFriends: true,
+      shareLocationPublicly: false,
+      allowExternalAiProcessing: true,
       pokemon: {
         id: 11,
         name: 'Luna',
@@ -146,7 +149,7 @@ describe('UsersService', () => {
       },
     });
 
-    const result = await service.findUserInfoById(2);
+    const result = await service.findSelfInfoById(2);
 
     expect(prismaService.users.findUnique).toHaveBeenCalledWith({
       where: { userId: 2 },
@@ -159,6 +162,9 @@ describe('UsersService', () => {
         lastKnownLat: true,
         lastKnownLng: true,
         lastSeenAt: true,
+        shareLocationWithFriends: true,
+        shareLocationPublicly: true,
+        allowExternalAiProcessing: true,
         pokemon: {
           select: {
             id: true,
@@ -188,6 +194,11 @@ describe('UsersService', () => {
       },
       lastSeenAt,
       isOnline: true,
+      privacySettings: {
+        shareLocationWithFriends: true,
+        shareLocationPublicly: false,
+        allowExternalAiProcessing: true,
+      },
       pokemon: [
         {
           id: 11,
@@ -251,6 +262,7 @@ describe('UsersService', () => {
         lastKnownLat: 50.0873,
         lastKnownLng: 14.4236,
         lastSeenAt: new Date(),
+        shareLocationPublicly: true,
         pokemon: {
           id: 4,
           name: 'Pearl',
@@ -270,6 +282,7 @@ describe('UsersService', () => {
         lastKnownLat: 50.14,
         lastKnownLng: 14.55,
         lastSeenAt: new Date('2020-01-01T00:00:00.000Z'),
+        shareLocationPublicly: false,
         pokemon: {
           id: 5,
           name: 'Bolt',
@@ -293,10 +306,6 @@ describe('UsersService', () => {
       userId: 2,
       username: 'alice',
       isOnline: true,
-      lastKnownLocation: {
-        lat: 50.0873,
-        lng: 14.4236,
-      },
       pokemon: [
         {
           id: 4,
@@ -414,6 +423,11 @@ describe('UsersService', () => {
       lastKnownLocation: null,
       lastSeenAt: null,
       isOnline: false,
+      privacySettings: {
+        shareLocationWithFriends: false,
+        shareLocationPublicly: false,
+        allowExternalAiProcessing: false,
+      },
       pokemon: [
         {
           id: 21,

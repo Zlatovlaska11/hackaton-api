@@ -1,24 +1,46 @@
-import { Injectable, ServiceUnavailableException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import OpenAI from 'openai';
+import { UsersService } from '../users/users.service';
 
 @Injectable()
 export class QuestionsService {
   private client: OpenAI | null = null;
+  private readonly model =
+    process.env.QUESTIONS_AI_MODEL?.trim() || 'gpt-5-mini';
 
-  async ask(question: string) {
-    const response = await this.getClient().chat.completions.create({
-      model: 'o1',
-      messages: [
-        {
-          role: 'user',
-          content: `Give me exactly 10 short bullet steps how to learn (10 steps - like in duolingo) ${question}.
-            Respond ONLY in valid JSON:
-            ${question}`,
-        },
-      ],
+  constructor(private readonly usersService: UsersService) {}
+
+  async ask(userId: number, question: string) {
+    const normalizedQuestion = question.trim();
+
+    if (!normalizedQuestion) {
+      throw new BadRequestException('question is required');
+    }
+
+    const canUseExternalAi = await this.usersService.canUseExternalAi(userId);
+
+    if (!canUseExternalAi) {
+      throw new ForbiddenException(
+        'External AI processing is disabled for this account',
+      );
+    }
+
+    const response = await this.getClient().responses.create({
+      model: this.model,
+      input: `Give exactly 10 short bullet steps for learning this topic. Return plain JSON with a single "steps" array of 10 short strings. Topic: ${normalizedQuestion}`,
     });
 
-    return response.choices[0].message.content;
+    return {
+      content: response.output_text,
+      usedAi: true,
+      provider: 'openai',
+      model: this.model,
+    };
   }
 
   private getClient() {

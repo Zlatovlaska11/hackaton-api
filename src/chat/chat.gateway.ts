@@ -10,15 +10,17 @@ import { JwtService } from '@nestjs/jwt';
 import { ChatService } from './chat.service';
 import { HttpException } from '@nestjs/common';
 import { UsersService } from '../users/users.service';
+import { buildWebsocketCorsOptions } from '../security/cors.util';
+
+const MAX_SOCKET_MESSAGES_PER_MINUTE = 30;
 
 @WebSocketGateway({
-  cors: {
-    origin: '*',
-  },
+  cors: buildWebsocketCorsOptions(),
 })
 export class ChatGateway {
   @WebSocketServer()
   server: Server;
+  private readonly messageWindows = new Map<number, number[]>();
 
   constructor(
     private jwtService: JwtService,
@@ -57,6 +59,11 @@ export class ChatGateway {
     const senderId = client.data.user.sub;
 
     try {
+      if (!this.canSendMessage(senderId)) {
+        client.emit('error', { message: 'Rate limit exceeded' });
+        return;
+      }
+
       await this.usersService.markUserActive(senderId);
       const message = await this.chatService.createMessage(
         senderId,
@@ -81,5 +88,21 @@ export class ChatGateway {
 
   private getUserRoom(userId: number) {
     return `user:${userId}`;
+  }
+
+  private canSendMessage(userId: number) {
+    const now = Date.now();
+    const cutoff = now - 60 * 1000;
+    const activeWindow = (this.messageWindows.get(userId) ?? []).filter(
+      (timestamp) => timestamp > cutoff,
+    );
+
+    if (activeWindow.length >= MAX_SOCKET_MESSAGES_PER_MINUTE) {
+      return false;
+    }
+
+    activeWindow.push(now);
+    this.messageWindows.set(userId, activeWindow);
+    return true;
   }
 }

@@ -9,7 +9,7 @@ describe('AuthController', () => {
     register: jest.fn(),
   };
   const usersService = {
-    findUserInfoById: jest.fn(),
+    findSelfInfoById: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -55,7 +55,7 @@ describe('AuthController', () => {
   });
 
   it('loads the authenticated profile from the database', async () => {
-    usersService.findUserInfoById.mockResolvedValue({
+    usersService.findSelfInfoById.mockResolvedValue({
       userId: 7,
       username: 'john',
       petType: 'city',
@@ -76,7 +76,7 @@ describe('AuthController', () => {
       },
     });
 
-    expect(usersService.findUserInfoById).toHaveBeenCalledWith(7);
+    expect(usersService.findSelfInfoById).toHaveBeenCalledWith(7);
     expect(result).toEqual({
       userId: 7,
       username: 'john',
@@ -94,7 +94,7 @@ describe('AuthController', () => {
   });
 
   it('loads /auth/me from the authenticated user id', async () => {
-    usersService.findUserInfoById.mockResolvedValue({
+    usersService.findSelfInfoById.mockResolvedValue({
       userId: 8,
       username: 'maria',
       petType: 'water',
@@ -115,7 +115,7 @@ describe('AuthController', () => {
       },
     });
 
-    expect(usersService.findUserInfoById).toHaveBeenCalledWith(8);
+    expect(usersService.findSelfInfoById).toHaveBeenCalledWith(8);
     expect(result).toEqual({
       userId: 8,
       username: 'maria',

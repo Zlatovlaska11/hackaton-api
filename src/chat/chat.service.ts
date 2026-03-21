@@ -6,6 +6,8 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from '../users/users.service';
 
+const MAX_MESSAGE_LENGTH = 2000;
+
 @Injectable()
 export class ChatService {
   constructor(
@@ -26,6 +28,12 @@ export class ChatService {
 
     if (!normalizedText) {
       throw new BadRequestException('Message text is required');
+    }
+
+    if (normalizedText.length > MAX_MESSAGE_LENGTH) {
+      throw new BadRequestException(
+        `Message text must not exceed ${MAX_MESSAGE_LENGTH} characters`,
+      );
     }
 
     const receiver = await this.usersService.findById(receiverId);

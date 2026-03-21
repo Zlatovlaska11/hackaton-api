@@ -11,6 +11,8 @@ import { LocalAuthGuard } from './guards/local-auth.guard';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { UsersService } from '../users/users.service';
+import { RateLimit } from '../security/rate-limit.decorator';
+import { RateLimitGuard } from '../security/rate-limit.guard';
 
 @Controller('auth')
 export class AuthController {
@@ -19,6 +21,8 @@ export class AuthController {
     private usersService: UsersService,
   ) {}
 
+  @UseGuards(RateLimitGuard)
+  @RateLimit({ key: 'ip', limit: 10, windowMs: 10 * 60 * 1000 })
   @Post('register')
   async register(@Body() body: Record<string, any>) {
     return this.authService.register(
@@ -29,7 +33,8 @@ export class AuthController {
     );
   }
 
-  @UseGuards(LocalAuthGuard)
+  @UseGuards(RateLimitGuard, LocalAuthGuard)
+  @RateLimit({ key: 'ip', limit: 30, windowMs: 10 * 60 * 1000 })
   @Post('login')
   async login(@Request() req) {
     return this.authService.login(req.user);
@@ -48,7 +53,7 @@ export class AuthController {
   }
 
   private async getAuthenticatedUserProfile(userId: number) {
-    const user = await this.usersService.findUserInfoById(userId);
+    const user = await this.usersService.findSelfInfoById(userId);
 
     if (!user) {
       throw new NotFoundException('User not found');

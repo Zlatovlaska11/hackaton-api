@@ -105,9 +105,9 @@ export class RoutesService {
   private readonly openAiClient = this.openAiApiKey
     ? new OpenAI({ apiKey: this.openAiApiKey })
     : undefined;
-  private readonly openStreetMapBaseUrl =
-    process.env.OSRM_BASE_URL?.trim().replace(/\/+$/, '') ||
-    'https://router.project-osrm.org';
+  private readonly openStreetMapBaseUrl = process.env.OSRM_BASE_URL
+    ?.trim()
+    .replace(/\/+$/, '');
   private readonly openStreetMapProfile =
     process.env.OSRM_PROFILE?.trim() || 'foot';
   private readonly pointRadiusMeters = this.parsePositiveNumber(
@@ -152,16 +152,18 @@ export class RoutesService {
       input.distanceMeters,
     );
     const pokemon = await this.findRoutePokemon(userId, input.pokemonId);
+    const allowExternalAiProcessing =
+      await this.usersService.canUseExternalAi(userId);
 
     if (!pokemon) {
       throw new NotFoundException('Pokemon not found');
     }
 
     const plannedTrip = await this.planTrip(
-      input.point,
       distanceMeters,
       pokemon.behavior,
       pokemon.id,
+      allowExternalAiProcessing,
     );
     const routedPath = await this.tryGenerateRouteWithOpenStreetMap(
       input.point,
@@ -499,26 +501,23 @@ export class RoutesService {
   }
 
   private async planTrip(
-    origin: GeoPoint,
     distanceMeters: number,
     behavior: Behavior,
     pokemonId: number,
+    allowExternalAiProcessing: boolean,
   ): Promise<PlannedTrip> {
-    const aiPlannedTrip = await this.tryPlanTripWithAi(
-      origin,
-      distanceMeters,
-      behavior,
-    );
+    const aiPlannedTrip = allowExternalAiProcessing
+      ? await this.tryPlanTripWithAi(distanceMeters, behavior)
+      : null;
 
     if (aiPlannedTrip) {
       return aiPlannedTrip;
     }
 
-    return this.buildHeuristicTrip(origin, distanceMeters, behavior, pokemonId);
+    return this.buildHeuristicTrip(distanceMeters, behavior, pokemonId);
   }
 
   private async tryPlanTripWithAi(
-    origin: GeoPoint,
     distanceMeters: number,
     behavior: Behavior,
   ): Promise<PlannedTrip | null> {
@@ -533,7 +532,6 @@ export class RoutesService {
           'You design believable walking routes for virtual pets. Return only structured route-planning data that will later be turned into map points.',
         input: JSON.stringify({
           behavior,
-          origin,
           distanceMeters,
           constraints: {
             bearingRange: [0, 360],
@@ -639,12 +637,11 @@ export class RoutesService {
   }
 
   private buildHeuristicTrip(
-    origin: GeoPoint,
     distanceMeters: number,
     behavior: Behavior,
     pokemonId: number,
   ): PlannedTrip {
-    const seed = this.makeSeed(origin, pokemonId);
+    const seed = this.makeSeed(distanceMeters, pokemonId);
     const routeBias = distanceMeters >= 1500 ? 1 : 0.7;
 
     switch (behavior) {
@@ -748,6 +745,10 @@ export class RoutesService {
     destination: GeoPoint,
     waypointPoints: GeoPoint[],
   ): Promise<GeoPoint[] | null> {
+    if (!this.openStreetMapBaseUrl) {
+      return null;
+    }
+
     try {
       const response = await fetch(
         `${this.openStreetMapBaseUrl}/route/v1/${this.openStreetMapProfile}/${origin.lng},${origin.lat};${[
@@ -865,6 +866,10 @@ export class RoutesService {
     requestedDistanceMeters: number,
     plannedTrip: PlannedTrip,
   ): Promise<RoutedPathPlan | null> {
+    if (!this.openStreetMapBaseUrl) {
+      return null;
+    }
+
     const candidateDestinations = this.buildOpenStreetMapDestinations(
       origin,
       requestedDistanceMeters,
@@ -928,6 +933,10 @@ export class RoutesService {
     origin: GeoPoint,
     destination: GeoPoint,
   ): Promise<RoutedPathPlan | null> {
+    if (!this.openStreetMapBaseUrl) {
+      return null;
+    }
+
     try {
       const response = await fetch(
         `${this.openStreetMapBaseUrl}/route/v1/${this.openStreetMapProfile}/${origin.lng},${origin.lat};${destination.lng},${destination.lat}?overview=full&geometries=geojson&steps=false`,
@@ -1200,10 +1209,8 @@ export class RoutesService {
     };
   }
 
-  private makeSeed(origin: GeoPoint, pokemonId: number) {
-    const rawValue = Math.sin(
-      origin.lat * 12.9898 + origin.lng * 78.233 + pokemonId * 0.3456,
-    );
+  private makeSeed(distanceMeters: number, pokemonId: number) {
+    const rawValue = Math.sin(distanceMeters * 0.0019 + pokemonId * 0.3456);
 
     return rawValue - Math.floor(rawValue);
   }

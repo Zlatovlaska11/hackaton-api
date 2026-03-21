@@ -9,6 +9,8 @@ import { PrismaModule } from './prisma/prisma.module';
 import { ChatModule } from './chat/chat.module';
 import { RoutesModule } from './routes/routes.module';
 import { PokemonModule } from './pokemon/pokemon.module';
+import { SecurityModule } from './security/security.module';
+import { PrivacyModule } from './privacy/privacy.module';
 
 @Module({
   imports: [
@@ -23,6 +25,8 @@ import { PokemonModule } from './pokemon/pokemon.module';
     ChatModule,
     RoutesModule,
     PokemonModule,
+    SecurityModule,
+    PrivacyModule,
   ],
   controllers: [AppController],
   providers: [AppService],

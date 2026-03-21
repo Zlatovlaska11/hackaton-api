@@ -7,7 +7,7 @@ describe('UsersController', () => {
   let controller: UsersController;
 
   const usersService = {
-    findUserInfoById: jest.fn(),
+    findPublicUserProfileById: jest.fn(),
     listNearbyUsers: jest.fn(),
     listForChat: jest.fn(),
     listFriends: jest.fn(),
@@ -16,6 +16,10 @@ describe('UsersController', () => {
     sendFriendRequest: jest.fn(),
     acceptFriendRequest: jest.fn(),
     addPokemon: jest.fn(),
+    getPrivacySettings: jest.fn(),
+    updatePrivacySettings: jest.fn(),
+    exportUserData: jest.fn(),
+    deleteAccount: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -35,42 +39,30 @@ describe('UsersController', () => {
   });
 
   it('loads detailed user info by id with xp', async () => {
-    usersService.findUserInfoById.mockResolvedValue({
+    usersService.findPublicUserProfileById.mockResolvedValue({
       userId: 9,
       username: 'ivy',
       petType: 'tree',
       petName: 'Moss',
       xp: 31,
-      lastKnownLocation: {
-        lat: 50.087,
-        lng: 14.421,
-      },
-      lastSeenAt: null,
-      isOnline: false,
       pokemon: [],
     });
 
     const result = await controller.getUser(9);
 
-    expect(usersService.findUserInfoById).toHaveBeenCalledWith(9);
+    expect(usersService.findPublicUserProfileById).toHaveBeenCalledWith(9);
     expect(result).toEqual({
       userId: 9,
       username: 'ivy',
       petType: 'tree',
       petName: 'Moss',
       xp: 31,
-      lastKnownLocation: {
-        lat: 50.087,
-        lng: 14.421,
-      },
-      lastSeenAt: null,
-      isOnline: false,
       pokemon: [],
     });
   });
 
   it('throws when the user does not exist', async () => {
-    usersService.findUserInfoById.mockResolvedValue(null);
+    usersService.findPublicUserProfileById.mockResolvedValue(null);
 
     await expect(controller.getUser(999)).rejects.toBeInstanceOf(
       NotFoundException,

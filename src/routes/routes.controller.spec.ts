@@ -37,13 +37,11 @@ describe('RoutesController', () => {
           userId: 5,
         },
       },
-      undefined,
-      undefined,
-      undefined,
-      '50.087,14.421',
-      '1200',
-      undefined,
-      '7',
+      {
+        point: '50.087,14.421',
+        distance: '1200',
+        id_pokemona: '7',
+      },
     );
 
     expect(routesService.createPath).toHaveBeenCalledWith(5, {
@@ -68,13 +66,10 @@ describe('RoutesController', () => {
           userId: 6,
         },
       },
-      undefined,
-      undefined,
-      undefined,
-      '50.087,14.421',
-      '1200',
-      undefined,
-      undefined,
+      {
+        point: '50.087,14.421',
+        distance: '1200',
+      },
     );
 
     expect(routesService.createPath).toHaveBeenCalledWith(6, {

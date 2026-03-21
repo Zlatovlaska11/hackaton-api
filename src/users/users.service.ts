@@ -11,10 +11,17 @@ import { PrismaService } from '../prisma/prisma.service';
 
 const ONLINE_WINDOW_MS = 5 * 60 * 1000;
 const EARTH_RADIUS_METERS = 6371000;
+const DEFAULT_FRIEND_LOCATION_PRECISION_DECIMALS = 3;
 
 const userSummarySelect = {
   userId: true,
   username: true,
+} as const;
+
+const privacySettingsSelect = {
+  shareLocationWithFriends: true,
+  shareLocationPublicly: true,
+  allowExternalAiProcessing: true,
 } as const;
 
 const pokemonStatsSelect = {
@@ -33,17 +40,38 @@ const pokemonSummarySelect = {
   },
 } as const;
 
-const userInfoSelect = {
+const publicUserInfoSelect = {
   ...userSummarySelect,
   petType: true,
   petName: true,
   xp: true,
-  lastKnownLat: true,
-  lastKnownLng: true,
-  lastSeenAt: true,
   pokemon: {
     select: pokemonSummarySelect,
   },
+} as const;
+
+const selfUserInfoSelect = {
+  ...publicUserInfoSelect,
+  lastKnownLat: true,
+  lastKnownLng: true,
+  lastSeenAt: true,
+  ...privacySettingsSelect,
+} as const;
+
+const nearbyUserSelect = {
+  ...publicUserInfoSelect,
+  lastKnownLat: true,
+  lastKnownLng: true,
+  lastSeenAt: true,
+  shareLocationPublicly: true,
+} as const;
+
+const friendLocationUserSelect = {
+  ...userSummarySelect,
+  lastKnownLat: true,
+  lastKnownLng: true,
+  lastSeenAt: true,
+  shareLocationWithFriends: true,
 } as const;
 
 const friendRequestSelect = {
@@ -65,8 +93,17 @@ type PrismaWriteClient = PrismaService | Prisma.TransactionClient;
 type RawPokemonSummary = Prisma.PokemonGetPayload<{
   select: typeof pokemonSummarySelect;
 }>;
-type RawUserInfo = Prisma.UsersGetPayload<{
-  select: typeof userInfoSelect;
+type RawPublicUserInfo = Prisma.UsersGetPayload<{
+  select: typeof publicUserInfoSelect;
+}>;
+type RawSelfUserInfo = Prisma.UsersGetPayload<{
+  select: typeof selfUserInfoSelect;
+}>;
+type RawNearbyUserInfo = Prisma.UsersGetPayload<{
+  select: typeof nearbyUserSelect;
+}>;
+type RawFriendLocationUser = Prisma.UsersGetPayload<{
+  select: typeof friendLocationUserSelect;
 }>;
 
 export type UserSummary = {
@@ -93,18 +130,29 @@ export type PokemonSummary = {
   stats: PokemonStatsSummary | null;
 };
 
-export type UserInfo = UserSummary & {
+export type PrivacySettings = {
+  shareLocationWithFriends: boolean;
+  shareLocationPublicly: boolean;
+  allowExternalAiProcessing: boolean;
+};
+
+export type PublicUserInfo = UserSummary & {
   petType: string | null;
   petName: string | null;
   xp: number;
-  lastKnownLocation: GpsPoint | null;
-  lastSeenAt: Date | null;
-  isOnline: boolean;
   pokemon: PokemonSummary[];
 };
 
-export type NearbyUserSummary = UserInfo & {
+export type UserInfo = PublicUserInfo & {
+  lastKnownLocation: GpsPoint | null;
+  lastSeenAt: Date | null;
+  isOnline: boolean;
+  privacySettings: PrivacySettings;
+};
+
+export type NearbyUserSummary = PublicUserInfo & {
   distanceMeters: number;
+  isOnline: boolean;
 };
 
 export type ChatUserSummary = UserSummary;
@@ -115,7 +163,6 @@ export type FriendSummary = UserSummary & {
 
 export type FriendLocationSummary = UserSummary & {
   point: GpsPoint;
-  lastSeenAt: Date | null;
   isOnline: boolean;
 };
 
@@ -127,6 +174,12 @@ export type FriendRequestListItem = {
 
 @Injectable()
 export class UsersService {
+  private readonly friendLocationPrecisionDecimals =
+    this.parsePrecisionDecimals(
+      process.env.FRIEND_LOCATION_PRECISION_DECIMALS,
+      DEFAULT_FRIEND_LOCATION_PRECISION_DECIMALS,
+    );
+
   constructor(private prisma: PrismaService) {}
 
   async findOne(username: string): Promise<Users | null> {
@@ -135,6 +188,82 @@ export class UsersService {
         username,
       },
     });
+  }
+
+  async findById(userId: number): Promise<ChatUserSummary | null> {
+    return this.prisma.users.findUnique({
+      where: { userId },
+      select: userSummarySelect,
+    });
+  }
+
+  async findSelfInfoById(userId: number): Promise<UserInfo | null> {
+    const user = await this.prisma.users.findUnique({
+      where: { userId },
+      select: selfUserInfoSelect,
+    });
+
+    return user ? this.mapSelfUserInfo(user) : null;
+  }
+
+  async findPublicUserProfileById(userId: number): Promise<PublicUserInfo | null> {
+    const user = await this.prisma.users.findUnique({
+      where: { userId },
+      select: publicUserInfoSelect,
+    });
+
+    return user ? this.mapPublicUserInfo(user) : null;
+  }
+
+  async getPrivacySettings(userId: number): Promise<PrivacySettings> {
+    const user = await this.prisma.users.findUnique({
+      where: { userId },
+      select: privacySettingsSelect,
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    return this.mapPrivacySettings(user);
+  }
+
+  async canUseExternalAi(userId: number) {
+    const privacySettings = await this.getPrivacySettings(userId);
+    return privacySettings.allowExternalAiProcessing;
+  }
+
+  async updatePrivacySettings(
+    userId: number,
+    input: Partial<PrivacySettings>,
+  ): Promise<PrivacySettings> {
+    const updates: Partial<PrivacySettings> = {};
+
+    if (typeof input.shareLocationWithFriends === 'boolean') {
+      updates.shareLocationWithFriends = input.shareLocationWithFriends;
+    }
+
+    if (typeof input.shareLocationPublicly === 'boolean') {
+      updates.shareLocationPublicly = input.shareLocationPublicly;
+    }
+
+    if (typeof input.allowExternalAiProcessing === 'boolean') {
+      updates.allowExternalAiProcessing = input.allowExternalAiProcessing;
+    }
+
+    if (!Object.keys(updates).length) {
+      throw new BadRequestException('At least one privacy setting must be provided');
+    }
+
+    const user = await this.prisma.users.update({
+      where: {
+        userId,
+      },
+      data: updates,
+      select: privacySettingsSelect,
+    });
+
+    return this.mapPrivacySettings(user);
   }
 
   async create(data: {
@@ -225,7 +354,7 @@ export class UsersService {
       });
     });
 
-    const updatedUser = await this.findUserInfoById(userId);
+    const updatedUser = await this.findSelfInfoById(userId);
 
     if (!updatedUser) {
       throw new NotFoundException('User not found');
@@ -256,22 +385,6 @@ export class UsersService {
         lastSeenAt: new Date(),
       },
     });
-  }
-
-  async findById(userId: number): Promise<ChatUserSummary | null> {
-    return this.prisma.users.findUnique({
-      where: { userId },
-      select: userSummarySelect,
-    });
-  }
-
-  async findUserInfoById(userId: number): Promise<UserInfo | null> {
-    const user = await this.prisma.users.findUnique({
-      where: { userId },
-      select: userInfoSelect,
-    });
-
-    return user ? this.mapUserInfo(user) : null;
   }
 
   async listForChat(
@@ -344,6 +457,7 @@ export class UsersService {
         userId: {
           not: currentUserId,
         },
+        shareLocationPublicly: true,
         lastKnownLat: {
           not: null,
         },
@@ -359,11 +473,15 @@ export class UsersService {
             }
           : {}),
       },
-      select: userInfoSelect,
+      select: nearbyUserSelect,
     });
 
     return users
       .map((user) => {
+        if (!user.shareLocationPublicly) {
+          return null;
+        }
+
         const userPoint = this.getLocation(user);
 
         if (!userPoint) {
@@ -385,8 +503,9 @@ export class UsersService {
         }
 
         return {
-          ...this.mapUserInfo(user),
+          ...this.mapPublicUserInfo(user),
           distanceMeters,
+          isOnline,
         };
       })
       .filter((user): user is NearbyUserSummary => user !== null)
@@ -415,6 +534,7 @@ export class UsersService {
         userId: {
           in: friends.map((friend) => friend.userId),
         },
+        shareLocationWithFriends: true,
         lastKnownLat: {
           not: null,
         },
@@ -422,16 +542,15 @@ export class UsersService {
           not: null,
         },
       },
-      select: {
-        ...userSummarySelect,
-        lastKnownLat: true,
-        lastKnownLng: true,
-        lastSeenAt: true,
-      },
+      select: friendLocationUserSelect,
     });
 
     return users
       .map((user) => {
+        if (!user.shareLocationWithFriends) {
+          return null;
+        }
+
         const point = this.getLocation(user);
 
         if (!point) {
@@ -441,8 +560,7 @@ export class UsersService {
         return {
           userId: user.userId,
           username: friendsById.get(user.userId)?.username ?? user.username,
-          point,
-          lastSeenAt: user.lastSeenAt,
+          point: this.obfuscateLocation(point),
           isOnline: this.isOnline(user.lastSeenAt),
         };
       })
@@ -611,6 +729,116 @@ export class UsersService {
     };
   }
 
+  async exportUserData(userId: number) {
+    const [profile, messages, friendRequests, routes] = await Promise.all([
+      this.findSelfInfoById(userId),
+      this.prisma.message.findMany({
+        where: {
+          OR: [{ senderId: userId }, { receiverId: userId }],
+        },
+        orderBy: {
+          createdAt: 'asc',
+        },
+        select: {
+          id: true,
+          text: true,
+          senderId: true,
+          receiverId: true,
+          createdAt: true,
+        },
+      }),
+      this.prisma.friendRequest.findMany({
+        where: {
+          OR: [{ requesterId: userId }, { receiverId: userId }],
+        },
+        orderBy: {
+          createdAt: 'asc',
+        },
+        select: friendRequestSelect,
+      }),
+      this.prisma.route.findMany({
+        where: {
+          userId,
+        },
+        orderBy: {
+          createdAt: 'asc',
+        },
+        select: {
+          id: true,
+          userId: true,
+          pokemonId: true,
+          createdAt: true,
+          ended: true,
+          inProgress: true,
+          donePercent: true,
+          startedAt: true,
+          endedAt: true,
+          points: {
+            select: {
+              id: true,
+              lat: true,
+              lng: true,
+              visited: true,
+              previousPointId: true,
+              nextPointId: true,
+            },
+          },
+          pokemon: {
+            select: pokemonSummarySelect,
+          },
+        },
+      }),
+    ]);
+
+    if (!profile) {
+      throw new NotFoundException('User not found');
+    }
+
+    return {
+      exportedAt: new Date(),
+      profile,
+      messages,
+      friendRequests,
+      routes,
+    };
+  }
+
+  async deleteAccount(userId: number) {
+    const user = await this.findById(userId);
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.message.deleteMany({
+        where: {
+          OR: [{ senderId: userId }, { receiverId: userId }],
+        },
+      });
+      await tx.friendRequest.deleteMany({
+        where: {
+          OR: [{ requesterId: userId }, { receiverId: userId }],
+        },
+      });
+      await tx.route.deleteMany({
+        where: {
+          userId,
+        },
+      });
+      await tx.users.delete({
+        where: {
+          userId,
+        },
+      });
+    });
+
+    return {
+      deleted: true,
+      userId,
+    };
+  }
+
   private async createPokemonForUser(
     prisma: PrismaWriteClient,
     input: {
@@ -632,16 +860,23 @@ export class UsersService {
     });
   }
 
-  private mapUserInfo(user: RawUserInfo): UserInfo {
+  private mapSelfUserInfo(user: RawSelfUserInfo): UserInfo {
+    return {
+      ...this.mapPublicUserInfo(user),
+      lastKnownLocation: this.getLocation(user),
+      lastSeenAt: user.lastSeenAt,
+      isOnline: this.isOnline(user.lastSeenAt),
+      privacySettings: this.mapPrivacySettings(user),
+    };
+  }
+
+  private mapPublicUserInfo(user: RawPublicUserInfo): PublicUserInfo {
     return {
       userId: user.userId,
       username: user.username,
       petType: user.petType,
       petName: user.petName,
       xp: typeof user.xp === 'number' ? user.xp : 0,
-      lastKnownLocation: this.getLocation(user),
-      lastSeenAt: user.lastSeenAt,
-      isOnline: this.isOnline(user.lastSeenAt),
       pokemon: user.pokemon ? [this.mapPokemon(user.pokemon)] : [],
     };
   }
@@ -659,6 +894,23 @@ export class UsersService {
             strength: pokemon.stats.strength,
           }
         : null,
+    };
+  }
+
+  private mapPrivacySettings(user: PrivacySettings): PrivacySettings {
+    return {
+      shareLocationWithFriends: Boolean(user.shareLocationWithFriends),
+      shareLocationPublicly: Boolean(user.shareLocationPublicly),
+      allowExternalAiProcessing: Boolean(user.allowExternalAiProcessing),
+    };
+  }
+
+  private obfuscateLocation(point: GpsPoint) {
+    const factor = 10 ** this.friendLocationPrecisionDecimals;
+
+    return {
+      lat: Math.round(point.lat * factor) / factor,
+      lng: Math.round(point.lng * factor) / factor,
     };
   }
 
@@ -865,5 +1117,13 @@ export class UsersService {
 
   private toRadians(value: number) {
     return (value * Math.PI) / 180;
+  }
+
+  private parsePrecisionDecimals(value: string | undefined, fallback: number) {
+    const parsedValue = Number(value?.trim());
+
+    return Number.isInteger(parsedValue) && parsedValue >= 0 && parsedValue <= 5
+      ? parsedValue
+      : fallback;
   }
 }
